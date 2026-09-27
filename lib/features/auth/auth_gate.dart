@@ -2,9 +2,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import 'auth_service.dart';
-import 'screens/authenticated_placeholder_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/verify_email_screen.dart';
+import 'vpay_account_gate.dart';
 
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key, this.authService});
@@ -52,7 +52,10 @@ class _AuthGateState extends State<AuthGate> {
           );
         }
 
-        return AuthenticatedPlaceholderScreen(authService: _authService);
+        return VPayAccountGate(
+          key: ValueKey(user.uid),
+          authService: _authService,
+        );
       },
     );
   }

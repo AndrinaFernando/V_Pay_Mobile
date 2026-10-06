@@ -19,6 +19,10 @@ class AuthService {
     return strategy.signIn(_auth);
   }
 
+  Future<void> sendPasswordResetEmail(String email) {
+    return _auth.sendPasswordResetEmail(email: email.trim());
+  }
+
   Future<UserCredential> registerWithEmailPassword({
     required String email,
     required String password,

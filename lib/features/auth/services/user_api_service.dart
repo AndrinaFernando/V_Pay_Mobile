@@ -11,6 +11,23 @@ class UserApiService {
 
   final ApiClient _apiClient;
 
+  Future<void> bootstrapUser({
+    required String name,
+    required String role,
+  }) async {
+    final response = await _apiClient.authenticatedPost(
+      '/api/users/bootstrap',
+      body: {'name': name.trim(), 'role': role},
+    );
+
+    if (response.statusCode != 200 && response.statusCode != 201) {
+      throw ApiException(
+        response.statusCode,
+        _errorMessage(response.body, response.statusCode),
+      );
+    }
+  }
+
   Future<UserProfileResult> getCurrentUserProfile() async {
     final response = await _apiClient.authenticatedGet('/api/me');
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/network/api_exception.dart';
+import 'app_access_gate.dart';
 import 'auth_service.dart';
 import 'models/user_profile_result.dart';
 import 'screens/authenticated_placeholder_screen.dart';
@@ -61,13 +62,19 @@ class _VPayAccountGateState extends State<VPayAccountGate> {
         final result = snapshot.data;
 
         if (result?.status == UserProfileStatus.exists) {
-          return AuthenticatedPlaceholderScreen(
+          return AppAccessGate(
             authService: widget.authService,
+            child: AuthenticatedPlaceholderScreen(
+              authService: widget.authService,
+            ),
           );
         }
 
         if (result?.status == UserProfileStatus.missing) {
-          return const CompleteProfileScreen();
+          return CompleteProfileScreen(
+            userApiService: _userApiService,
+            onProfileCompleted: _retry,
+          );
         }
 
         return _ProfileCheckError(

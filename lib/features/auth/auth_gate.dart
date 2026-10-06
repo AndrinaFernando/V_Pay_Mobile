@@ -42,7 +42,7 @@ class _AuthGateState extends State<AuthGate> {
         final user = _authService.currentUser;
 
         if (user == null) {
-          return const LoginScreen();
+          return LoginScreen(authService: _authService);
         }
 
         if (!user.emailVerified) {

@@ -5,15 +5,19 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import '../../../core/network/api_exception.dart';
+import '../auth_service.dart';
 import '../services/user_api_service.dart';
+import '../widgets/auth_form_widgets.dart';
 
 class CompleteProfileScreen extends StatefulWidget {
   const CompleteProfileScreen({
     super.key,
+    required this.authService,
     required this.userApiService,
     required this.onProfileCompleted,
   });
 
+  final AuthService authService;
   final UserApiService userApiService;
   final VoidCallback onProfileCompleted;
 
@@ -22,315 +26,389 @@ class CompleteProfileScreen extends StatefulWidget {
 }
 
 class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
-  static const _blue = Color(0xFF0072DC);
-  static const _ink = Color(0xFF222222);
-  static const _muted = Color(0xFF484848);
-  static const _networkError =
-      "We couldn't complete your VPay profile. Check your connection and try again.";
+  static const _customerRole = 'CUSTOMER';
+  static const _merchantRole = 'MERCHANT';
+  static const _businessCategories = <String>[
+    'Retail',
+    'Food & Beverage',
+    'Services',
+    'Healthcare',
+    'Education',
+    'Other',
+  ];
 
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
-  String? _selectedRole;
-  String? _roleError;
+  final _phoneController = TextEditingController();
+  final _businessNameController = TextEditingController();
+  final _businessAddressController = TextEditingController();
+
+  late final TextEditingController _emailController;
+  late final bool _emailUnavailable;
+
+  String _selectedRole = _customerRole;
+  String? _businessCategory;
   String? _requestError;
   bool _isSubmitting = false;
+
+  bool get _isMerchant => _selectedRole == _merchantRole;
+
+  @override
+  void initState() {
+    super.initState();
+    final email = widget.authService.currentUser?.email?.trim() ?? '';
+    _emailController = TextEditingController(text: email);
+    _emailUnavailable = email.isEmpty;
+  }
 
   @override
   void dispose() {
     _nameController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
+    _businessNameController.dispose();
+    _businessAddressController.dispose();
     super.dispose();
+  }
+
+  void _selectRole(String role) {
+    if (_isSubmitting || role == _selectedRole) return;
+
+    setState(() {
+      _selectedRole = role;
+      _requestError = null;
+    });
+  }
+
+  String? _validateName(String? value) {
+    final name = value?.trim() ?? '';
+    if (name.isEmpty) {
+      return _isMerchant
+          ? 'Contact person name is required.'
+          : 'Full name is required.';
+    }
+    if (name.length < 2) return 'Name must be at least 2 characters.';
+    if (name.length > 80) return 'Name must be 80 characters or fewer.';
+    return null;
+  }
+
+  String? _validateEmail(String? value) {
+    if ((value ?? '').trim().isEmpty) {
+      return 'Your account email is unavailable. Please sign in again.';
+    }
+    return null;
+  }
+
+  String? _validatePhone(String? value) {
+    final phone = value?.trim() ?? '';
+    if (phone.isEmpty) return 'Mobile number is required.';
+
+    final compact = phone.replaceAll(RegExp(r'[\s-]'), '');
+    final isLocal = RegExp(r'^07\d{8}$').hasMatch(compact);
+    final isInternational = RegExp(r'^\+947\d{8}$').hasMatch(compact);
+    if (!isLocal && !isInternational) {
+      return 'Enter a valid Sri Lankan mobile number.';
+    }
+    return null;
+  }
+
+  String? _validateBusinessName(String? value) {
+    final businessName = value?.trim() ?? '';
+    if (businessName.isEmpty) return 'Business name is required.';
+    if (businessName.length < 2) {
+      return 'Business name must be at least 2 characters.';
+    }
+    if (businessName.length > 100) {
+      return 'Business name must be 100 characters or fewer.';
+    }
+    return null;
+  }
+
+  String? _validateBusinessCategory(String? value) {
+    if (value == null || !_businessCategories.contains(value)) {
+      return 'Choose a business category.';
+    }
+    return null;
+  }
+
+  String? _validateBusinessAddress(String? value) {
+    final address = value?.trim() ?? '';
+    if (address.isEmpty) return 'Business address is required.';
+    if (address.length < 5) {
+      return 'Business address must be at least 5 characters.';
+    }
+    if (address.length > 200) {
+      return 'Business address must be 200 characters or fewer.';
+    }
+    return null;
   }
 
   Future<void> _submit() async {
     if (_isSubmitting) return;
 
-    final validName = _formKey.currentState?.validate() ?? false;
+    if (_emailUnavailable ||
+        (widget.authService.currentUser?.email?.trim().isEmpty ?? true)) {
+      setState(() {
+        _requestError =
+            'Your account email is unavailable. Please sign in again.';
+      });
+      return;
+    }
+
+    if (!_formKey.currentState!.validate()) return;
+
     setState(() {
-      _roleError = _selectedRole == null ? 'Choose an account type.' : null;
+      _isSubmitting = true;
       _requestError = null;
     });
-    if (!validName || _selectedRole == null) return;
-
-    final name = _nameController.text.trim();
-    _nameController.value = _nameController.value.copyWith(
-      text: name,
-      selection: TextSelection.collapsed(offset: name.length),
-    );
-    setState(() => _isSubmitting = true);
 
     try {
       await widget.userApiService.bootstrapUser(
-        name: name,
-        role: _selectedRole!,
+        name: _nameController.text,
+        phone: _phoneController.text,
+        role: _selectedRole,
+        businessName: _isMerchant ? _businessNameController.text : null,
+        businessCategory: _isMerchant ? _businessCategory : null,
+        businessAddress: _isMerchant ? _businessAddressController.text : null,
       );
-      if (mounted) widget.onProfileCompleted();
+
+      if (!mounted) return;
+      widget.onProfileCompleted();
     } on ApiException catch (error) {
-      if (mounted) setState(() => _requestError = _apiErrorMessage(error));
-    } on SocketException catch (_) {
-      if (mounted) setState(() => _requestError = _networkError);
-    } on http.ClientException catch (_) {
-      if (mounted) setState(() => _requestError = _networkError);
-    } on TimeoutException catch (_) {
-      if (mounted) setState(() => _requestError = _networkError);
-    } on StateError catch (_) {
-      if (mounted) {
-        setState(
-          () =>
-              _requestError = 'Your session has expired. Please sign in again.',
-        );
-      }
+      _showError(_messageForApiException(error));
+    } on SocketException {
+      _showError(
+        "We couldn't complete your VPay profile. "
+        'Check your connection and try again.',
+      );
+    } on http.ClientException {
+      _showError(
+        "We couldn't complete your VPay profile. "
+        'Check your connection and try again.',
+      );
+    } on TimeoutException {
+      _showError(
+        "We couldn't complete your VPay profile. "
+        'Check your connection and try again.',
+      );
+    } on StateError {
+      _showError('Your session has expired. Please sign in again.');
     } catch (_) {
-      if (mounted) {
-        setState(
-          () => _requestError =
-              'Something went wrong while setting up your VPay account.',
-        );
-      }
+      _showError('Something went wrong while setting up your VPay account.');
     } finally {
-      if (mounted) setState(() => _isSubmitting = false);
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
     }
   }
 
-  String _apiErrorMessage(ApiException error) => switch (error.statusCode) {
-    401 => 'Your session has expired. Please sign in again.',
-    403 => 'Please verify your email before completing your VPay profile.',
-    409 =>
-      'This VPay account is already configured with a different account type.',
-    _ => 'Something went wrong while setting up your VPay account.',
-  };
+  String _messageForApiException(ApiException error) {
+    return switch (error.statusCode) {
+      400 => error.message,
+      401 => 'Your session has expired. Please sign in again.',
+      403 => 'Please verify your email before completing your VPay profile.',
+      409 => 'This VPay account is already configured with a different account type.',
+      _ => 'Something went wrong while setting up your VPay account.',
+    };
+  }
 
-  Widget _roleTile(
-    String role,
-    String title,
-    String description,
-    IconData icon,
-  ) {
-    final selected = _selectedRole == role;
-    return Semantics(
-      button: true,
-      selected: selected,
-      child: Material(
-        color: selected ? const Color(0xFFEAF4FF) : const Color(0xFFF7F7F7),
-        borderRadius: BorderRadius.circular(16),
-        child: InkWell(
-          onTap: _isSubmitting
-              ? null
-              : () => setState(() {
-                  _selectedRole = role;
-                  _roleError = null;
-                  _requestError = null;
-                }),
-          borderRadius: BorderRadius.circular(16),
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              border: Border.all(
-                color: selected ? _blue : const Color(0xFFEBEBEB),
-                width: selected ? 2 : 1,
-              ),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(icon, color: selected ? _blue : const Color(0xFF01397C)),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: const TextStyle(
-                          color: _ink,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        description,
-                        style: const TextStyle(
-                          color: _muted,
-                          fontSize: 14,
-                          height: 1.4,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Icon(
-                  selected
-                      ? Icons.radio_button_checked
-                      : Icons.radio_button_off,
-                  color: selected ? _blue : const Color(0xFF767676),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+  void _showError(String message) {
+    if (!mounted) return;
+    setState(() => _requestError = message);
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 440),
-              child: Form(
-                key: _formKey,
-                autovalidateMode: AutovalidateMode.onUserInteraction,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text(
-                      'VPay',
-                      style: TextStyle(
-                        color: _blue,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
+    return AuthScreenLayout(
+      title: 'Set up your VPay account',
+      subtitle: 'Choose how you will use VPay and complete your details.',
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Account type',
+              style: TextStyle(
+                color: vPayInk,
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            _RoleSelector(
+              selectedRole: _selectedRole,
+              enabled: !_isSubmitting,
+              onSelected: _selectRole,
+            ),
+            const SizedBox(height: 24),
+            TextFormField(
+              controller: _nameController,
+              enabled: !_isSubmitting,
+              textCapitalization: TextCapitalization.words,
+              textInputAction: TextInputAction.next,
+              autofillHints: const [AutofillHints.name],
+              decoration: authInputDecoration(
+                _isMerchant ? 'Contact person name' : 'Full name',
+              ),
+              validator: _validateName,
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _emailController,
+              readOnly: true,
+              keyboardType: TextInputType.emailAddress,
+              decoration: authInputDecoration(
+                'Email',
+                suffixIcon: const Icon(Icons.lock_outline_rounded, size: 20),
+              ),
+              validator: _validateEmail,
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _phoneController,
+              enabled: !_isSubmitting,
+              keyboardType: TextInputType.phone,
+              textInputAction: _isMerchant
+                  ? TextInputAction.next
+                  : TextInputAction.done,
+              autofillHints: const [AutofillHints.telephoneNumber],
+              decoration: authInputDecoration('Mobile number'),
+              validator: _validatePhone,
+              onFieldSubmitted: _isMerchant ? null : (_) => _submit(),
+            ),
+            if (_isMerchant) ...[
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _businessNameController,
+                enabled: !_isSubmitting,
+                textCapitalization: TextCapitalization.words,
+                textInputAction: TextInputAction.next,
+                decoration: authInputDecoration('Business name'),
+                validator: _validateBusinessName,
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                initialValue: _businessCategory,
+                decoration: authInputDecoration('Business category'),
+                icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                items: _businessCategories
+                    .map(
+                      (category) => DropdownMenuItem(
+                        value: category,
+                        child: Text(category),
                       ),
-                    ),
-                    const SizedBox(height: 32),
-                    Container(
-                      width: 64,
-                      height: 64,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF7F7F7),
-                        border: Border.all(color: const Color(0xFFEBEBEB)),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: const Icon(
-                        Icons.person_outline,
-                        size: 32,
-                        color: Color(0xFF01397C),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    const Text(
-                      'Complete your VPay profile',
-                      style: TextStyle(
-                        color: _ink,
-                        fontSize: 28,
-                        fontWeight: FontWeight.w700,
-                        height: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    const Text(
-                      'Your email is verified. Add your name and choose how you will use VPay.',
-                      style: TextStyle(
-                        color: _muted,
-                        fontSize: 16,
-                        height: 1.4,
-                      ),
-                    ),
-                    const SizedBox(height: 32),
-                    TextFormField(
-                      controller: _nameController,
-                      enabled: !_isSubmitting,
-                      textCapitalization: TextCapitalization.words,
-                      textInputAction: TextInputAction.done,
-                      onFieldSubmitted: (_) => _submit(),
-                      decoration: InputDecoration(
-                        labelText: 'Full name',
-                        hintText: 'Enter your full name',
-                        filled: true,
-                        fillColor: const Color(0xFFF7F7F7),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(color: _blue),
-                        ),
-                      ),
-                      validator: (value) => (value?.trim().isEmpty ?? true)
-                          ? 'Enter your full name.'
-                          : null,
-                    ),
-                    const SizedBox(height: 28),
-                    const Text(
-                      'Account type',
-                      style: TextStyle(
-                        color: _ink,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    _roleTile(
-                      'CUSTOMER',
-                      'Customer',
-                      'Top up, pay merchants and manage your virtual card.',
-                      Icons.account_balance_wallet_outlined,
-                    ),
-                    const SizedBox(height: 12),
-                    _roleTile(
-                      'MERCHANT',
-                      'Merchant',
-                      'Accept VPay payments and manage your merchant account.',
-                      Icons.storefront_outlined,
-                    ),
-                    if (_roleError != null) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        _roleError!,
-                        style: const TextStyle(color: Color(0xFFB3261E)),
-                      ),
-                    ],
-                    if (_requestError != null) ...[
-                      const SizedBox(height: 20),
-                      Text(
-                        _requestError!,
-                        style: const TextStyle(
-                          color: Color(0xFFB3261E),
-                          height: 1.4,
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 28),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 52,
-                      child: ElevatedButton(
-                        onPressed: _isSubmitting ? null : _submit,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _blue,
-                          foregroundColor: Colors.white,
-                          disabledBackgroundColor: _blue,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                        ),
-                        child: _isSubmitting
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Text(
-                                'Complete profile',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                      ),
-                    ),
-                  ],
+                    )
+                    .toList(),
+                onChanged: _isSubmitting
+                    ? null
+                    : (value) => setState(() => _businessCategory = value),
+                validator: _validateBusinessCategory,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _businessAddressController,
+                enabled: !_isSubmitting,
+                keyboardType: TextInputType.streetAddress,
+                textCapitalization: TextCapitalization.sentences,
+                textInputAction: TextInputAction.newline,
+                minLines: 2,
+                maxLines: 3,
+                decoration: authInputDecoration('Business address'),
+                validator: _validateBusinessAddress,
+              ),
+            ],
+            if (_emailUnavailable) ...[
+              const SizedBox(height: 16),
+              const AuthErrorMessage(
+                'Your account email is unavailable. Please sign in again.',
+              ),
+            ],
+            if (_requestError != null && !_emailUnavailable) ...[
+              const SizedBox(height: 16),
+              AuthErrorMessage(_requestError!),
+            ],
+            const SizedBox(height: 24),
+            AuthPrimaryButton(
+              label: 'Complete profile',
+              onPressed: _emailUnavailable ? null : _submit,
+              isLoading: _isSubmitting,
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Your email is linked securely to your verified VPay account.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: vPayMuted, fontSize: 13, height: 1.4),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RoleSelector extends StatelessWidget {
+  const _RoleSelector({
+    required this.selectedRole,
+    required this.enabled,
+    required this.onSelected,
+  });
+
+  final String selectedRole;
+  final bool enabled;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 52,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Row(
+        children: [
+          _option(
+            label: 'Customer',
+            role: _CompleteProfileScreenState._customerRole,
+          ),
+          _option(
+            label: 'Merchant',
+            role: _CompleteProfileScreenState._merchantRole,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _option({required String label, required String role}) {
+    final selected = selectedRole == role;
+
+    return Expanded(
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: '$label account',
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: enabled ? () => onSelected(role) : null,
+            borderRadius: BorderRadius.circular(10),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: selected ? vPayBlue : Colors.transparent,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: selected ? Colors.white : vPayMuted,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ),

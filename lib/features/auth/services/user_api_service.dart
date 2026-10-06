@@ -13,11 +13,29 @@ class UserApiService {
 
   Future<void> bootstrapUser({
     required String name,
+    required String phone,
     required String role,
+    String? businessName,
+    String? businessCategory,
+    String? businessAddress,
   }) async {
+    final body = <String, dynamic>{
+      'name': name.trim(),
+      'phone': phone.trim(),
+      'role': role,
+    };
+
+    if (role == 'MERCHANT') {
+      body.addAll({
+        'businessName': businessName?.trim(),
+        'businessCategory': businessCategory,
+        'businessAddress': businessAddress?.trim(),
+      });
+    }
+
     final response = await _apiClient.authenticatedPost(
       '/api/users/bootstrap',
-      body: {'name': name.trim(), 'role': role},
+      body: body,
     );
 
     if (response.statusCode != 200 && response.statusCode != 201) {

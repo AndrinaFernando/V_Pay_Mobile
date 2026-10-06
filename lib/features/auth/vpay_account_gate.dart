@@ -72,6 +72,7 @@ class _VPayAccountGateState extends State<VPayAccountGate> {
 
         if (result?.status == UserProfileStatus.missing) {
           return CompleteProfileScreen(
+            authService: widget.authService,
             userApiService: _userApiService,
             onProfileCompleted: _retry,
           );

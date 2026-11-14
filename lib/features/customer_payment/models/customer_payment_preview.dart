@@ -23,7 +23,7 @@ enum CustomerPaymentStatus {
 
 class CustomerPaymentPreview {
   const CustomerPaymentPreview({
-    required this.merchantUid,
+    required this.paymentReference,
     required this.merchantName,
     required this.amountMinor,
     required this.currency,
@@ -34,7 +34,7 @@ class CustomerPaymentPreview {
     this.paidAt,
   });
 
-  final String merchantUid;
+  final String paymentReference;
   final String merchantName;
   final int amountMinor;
   final String currency;
@@ -45,10 +45,13 @@ class CustomerPaymentPreview {
   final DateTime? paidAt;
 
   factory CustomerPaymentPreview.fromJson(Map<String, dynamic> json) {
-    final merchantUid = _requiredText(json['merchantUid'], 'merchant UID');
+    final paymentReference = _requiredText(
+      json['paymentReference'],
+      'payment reference',
+    );
     final merchantName = _requiredText(json['merchantName'], 'merchant name');
     final amountMinor = json['amountMinor'];
-    if (amountMinor is! int || amountMinor < 0) {
+    if (amountMinor is! int || amountMinor <= 0) {
       throw const FormatException('Invalid payment amount');
     }
 
@@ -63,7 +66,7 @@ class CustomerPaymentPreview {
     }
 
     return CustomerPaymentPreview(
-      merchantUid: merchantUid,
+      paymentReference: paymentReference,
       merchantName: merchantName,
       amountMinor: amountMinor,
       currency: currency,

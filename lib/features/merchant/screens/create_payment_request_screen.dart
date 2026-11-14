@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import '../../../core/network/api_exception.dart';
 import '../models/merchant_payment_intent.dart';
 import '../services/payment_intent_service.dart';
+import '../widgets/merchant_brand_logo.dart';
 import 'payment_intent_qr_screen.dart';
 
 const _canvas = Color(0xFFFCF9F8);
@@ -153,9 +154,21 @@ class _CreatePaymentRequestScreenState
         foregroundColor: _ink,
         elevation: 0,
         centerTitle: false,
-        title: const Text(
-          'Create Payment Request',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+        titleSpacing: 0,
+        toolbarHeight: 64,
+        title: const Row(
+          children: [
+            MerchantBrandLogo(height: 22),
+            SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                'Create Payment Request',
+                maxLines: 2,
+                softWrap: true,
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
         ),
       ),
       body: SafeArea(

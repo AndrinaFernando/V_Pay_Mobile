@@ -74,6 +74,7 @@ flutter:
   assets:
     - assets/animations/error_404.json
     - assets/branding/vpay_logo.png
+    - assets/branding/logos/Logo Blue V2.0.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:

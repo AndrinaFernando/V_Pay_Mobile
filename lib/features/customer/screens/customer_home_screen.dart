@@ -24,10 +24,12 @@ class CustomerHomeScreen extends StatefulWidget {
     super.key,
     required this.profile,
     this.cardApiService,
+    this.onScanAndPay,
   });
 
   final VPayUserProfile profile;
   final CardApiService? cardApiService;
+  final VoidCallback? onScanAndPay;
 
   @override
   State<CustomerHomeScreen> createState() => _CustomerHomeScreenState();
@@ -194,7 +196,9 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
           child: SizedBox(
             height: 52,
             child: OutlinedButton.icon(
-              onPressed: () => _showComingSoon('Scan & Pay'),
+              key: const ValueKey('homeScanAndPayButton'),
+              onPressed:
+                  widget.onScanAndPay ?? () => _showComingSoon('Scan & Pay'),
               style: OutlinedButton.styleFrom(
                 backgroundColor: _surface,
                 foregroundColor: _strongBlue,

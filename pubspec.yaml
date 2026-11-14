@@ -39,6 +39,7 @@ dependencies:
   http: ^1.6.0
   local_auth: ^3.0.2
   lottie: ^3.6.1
+  mobile_scanner: ^7.5.0
 
 dev_dependencies:
   flutter_test:

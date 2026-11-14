@@ -28,7 +28,7 @@ CustomerPaymentPreview _preview({
   String? description = 'Lunch order',
 }) {
   return CustomerPaymentPreview(
-    merchantUid: 'merchant-123',
+    paymentReference: 'payment-ref-123',
     merchantName: 'Colombo Cafe',
     amountMinor: 1285050,
     currency: 'LKR',
@@ -62,7 +62,7 @@ void main() {
 
   test('rejects incomplete or unsupported preview data', () {
     final validJson = <String, dynamic>{
-      'merchantUid': 'merchant-123',
+      'paymentReference': 'payment-ref-123',
       'merchantName': 'Colombo Cafe',
       'amountMinor': 2500,
       'currency': 'LKR',

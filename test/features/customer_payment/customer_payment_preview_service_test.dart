@@ -29,13 +29,14 @@ Map<String, dynamic> _validEnvelope() {
     'success': true,
     'data': {
       'paymentIntent': {
-        'merchantUid': 'merchant-123',
-        'merchantName': 'Colombo Cafe',
-        'amountMinor': 250050,
+        'paymentReference': 'abc123',
+        'merchantName': 'Test Merchant',
+        'amountMinor': 125000,
         'currency': 'LKR',
         'status': 'PENDING',
-        'createdAt': '2099-02-03T08:00:00Z',
-        'expiresAt': '2099-02-03T08:15:00Z',
+        'createdAt': '2026-11-14T15:30:00.000Z',
+        'expiresAt': '2026-11-14T15:45:00.000Z',
+        'description': 'Order 123',
       },
     },
   };
@@ -50,15 +51,96 @@ void main() {
       );
       final service = ApiCustomerPaymentPreviewService(apiClient: apiClient);
 
-      final preview = await service.getPreview(' ref/with space ');
+      final preview = await service.getPreview(' abc123 ');
 
-      expect(preview.merchantName, 'Colombo Cafe');
-      expect(preview.amountMinor, 250050);
-      expect(apiClient.paths, [
-        '/api/payment-intents/ref%2Fwith%20space/preview',
-      ]);
+      expect(preview.paymentReference, 'abc123');
+      expect(preview.merchantName, 'Test Merchant');
+      expect(preview.amountMinor, 125000);
+      expect(preview.description, 'Order 123');
+      expect(apiClient.paths, ['/api/payment-intents/abc123/preview']);
     },
   );
+
+  test('rejects a payment reference that does not match the scan', () async {
+    final apiClient = _FakeApiClient(
+      (_) async => http.Response(jsonEncode(_validEnvelope()), 200),
+    );
+    final service = ApiCustomerPaymentPreviewService(apiClient: apiClient);
+
+    expect(
+      () => service.getPreview('different-reference'),
+      throwsA(
+        isA<CustomerPaymentPreviewException>().having(
+          (error) => error.failure,
+          'failure',
+          CustomerPaymentPreviewFailure.invalidResponse,
+        ),
+      ),
+    );
+  });
+
+  test('trims and encodes the scanned reference', () async {
+    final envelope = _validEnvelope();
+    ((envelope['data'] as Map<String, dynamic>)['paymentIntent']
+            as Map<String, dynamic>)['paymentReference'] =
+        'ref/with space';
+    final apiClient = _FakeApiClient(
+      (_) async => http.Response(jsonEncode(envelope), 200),
+    );
+    final service = ApiCustomerPaymentPreviewService(apiClient: apiClient);
+
+    await service.getPreview(' ref/with space ');
+
+    expect(apiClient.paths, [
+      '/api/payment-intents/ref%2Fwith%20space/preview',
+    ]);
+  });
+
+  test('rejects missing references and non-positive payment amounts', () async {
+    Future<CustomerPaymentPreviewFailure> failureFor(
+      Map<String, dynamic> envelope,
+    ) async {
+      final apiClient = _FakeApiClient(
+        (_) async => http.Response(jsonEncode(envelope), 200),
+      );
+      final service = ApiCustomerPaymentPreviewService(apiClient: apiClient);
+      try {
+        await service.getPreview('abc123');
+        fail('Expected preview lookup to fail');
+      } on CustomerPaymentPreviewException catch (error) {
+        return error.failure;
+      }
+    }
+
+    final missingReference = _validEnvelope();
+    ((missingReference['data'] as Map<String, dynamic>)['paymentIntent']
+            as Map<String, dynamic>)
+        .remove('paymentReference');
+    expect(
+      await failureFor(missingReference),
+      CustomerPaymentPreviewFailure.invalidResponse,
+    );
+
+    final emptyReference = _validEnvelope();
+    ((emptyReference['data'] as Map<String, dynamic>)['paymentIntent']
+            as Map<String, dynamic>)['paymentReference'] =
+        '   ';
+    expect(
+      await failureFor(emptyReference),
+      CustomerPaymentPreviewFailure.invalidResponse,
+    );
+
+    for (final amount in [0, -1, 1.5]) {
+      final invalidAmount = _validEnvelope();
+      ((invalidAmount['data'] as Map<String, dynamic>)['paymentIntent']
+              as Map<String, dynamic>)['amountMinor'] =
+          amount;
+      expect(
+        await failureFor(invalidAmount),
+        CustomerPaymentPreviewFailure.invalidResponse,
+      );
+    }
+  });
 
   test(
     'maps authentication, unknown-reference and invalid responses',

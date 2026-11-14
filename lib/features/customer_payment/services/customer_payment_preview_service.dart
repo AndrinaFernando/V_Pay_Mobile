@@ -83,7 +83,11 @@ class ApiCustomerPaymentPreviewService
       if (body['success'] != true) throw const FormatException();
       final data = body['data'] as Map<String, dynamic>;
       final paymentIntent = data['paymentIntent'] as Map<String, dynamic>;
-      return CustomerPaymentPreview.fromJson(paymentIntent);
+      final preview = CustomerPaymentPreview.fromJson(paymentIntent);
+      if (preview.paymentReference != reference) {
+        throw const FormatException('Mismatched payment reference');
+      }
+      return preview;
     } on FormatException {
       throw const CustomerPaymentPreviewException(
         CustomerPaymentPreviewFailure.invalidResponse,

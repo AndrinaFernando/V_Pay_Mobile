@@ -28,7 +28,7 @@ class _SuccessfulPreviewService implements CustomerPaymentPreviewService {
   Future<CustomerPaymentPreview> getPreview(String paymentReference) async {
     references.add(paymentReference);
     return CustomerPaymentPreview(
-      merchantUid: 'merchant-uid',
+      paymentReference: paymentReference,
       merchantName: 'VPay Test Merchant',
       amountMinor: 125000,
       currency: 'LKR',

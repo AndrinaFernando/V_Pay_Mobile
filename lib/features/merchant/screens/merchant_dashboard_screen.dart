@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../auth/models/vpay_user_profile.dart';
+import '../../auth/models/user_profile_result.dart';
+import '../../auth/services/user_api_service.dart';
+import '../services/payment_intent_service.dart';
 import 'create_payment_request_screen.dart';
+import '../widgets/merchant_brand_logo.dart';
 
 const _canvas = Color(0xFFFCF9F8);
 const _surface = Colors.white;
@@ -17,10 +21,14 @@ class MerchantDashboardScreen extends StatefulWidget {
     super.key,
     required this.profile,
     this.onCreatePaymentRequest,
+    this.loadProfile,
+    this.paymentIntentService,
   });
 
   final VPayUserProfile profile;
   final VoidCallback? onCreatePaymentRequest;
+  final Future<UserProfileResult> Function()? loadProfile;
+  final PaymentIntentService? paymentIntentService;
 
   @override
   State<MerchantDashboardScreen> createState() =>
@@ -29,16 +37,19 @@ class MerchantDashboardScreen extends StatefulWidget {
 
 class _MerchantDashboardScreenState extends State<MerchantDashboardScreen> {
   int _selectedNavigationIndex = 0;
+  late VPayUserProfile _profile = widget.profile;
+  bool _isRefreshingProfile = false;
+  String? _profileRefreshError;
 
   String get _businessName {
-    final businessName = widget.profile.businessName?.trim();
+    final businessName = _profile.businessName?.trim();
     return businessName == null || businessName.isEmpty
-        ? widget.profile.name
+        ? _profile.name
         : businessName;
   }
 
   String get _firstName {
-    final name = widget.profile.name.trim();
+    final name = _profile.name.trim();
     return name.isEmpty ? 'there' : name.split(RegExp(r'\s+')).first;
   }
 
@@ -49,16 +60,49 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen> {
     return 'Good evening';
   }
 
-  void _showCreateRequest() {
+  Future<void> _showCreateRequest() async {
     if (widget.onCreatePaymentRequest != null) {
       widget.onCreatePaymentRequest!();
+      if (mounted) setState(() => _selectedNavigationIndex = 0);
       return;
     }
-    Navigator.of(context).push(
+    await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
-        builder: (_) => const CreatePaymentRequestScreen(),
+        builder: (_) => CreatePaymentRequestScreen(
+          paymentIntentService: widget.paymentIntentService,
+        ),
       ),
     );
+    if (mounted) setState(() => _selectedNavigationIndex = 0);
+  }
+
+  Future<void> _refreshProfile() async {
+    if (_isRefreshingProfile) return;
+    setState(() {
+      _isRefreshingProfile = true;
+      _profileRefreshError = null;
+    });
+    try {
+      final result =
+          await (widget.loadProfile ??
+              () => UserApiService().getCurrentUserProfile())();
+      if (!mounted) return;
+      if (result.status == UserProfileStatus.exists && result.user != null) {
+        setState(() => _profile = result.user!);
+      } else {
+        setState(
+          () => _profileRefreshError = 'Could not refresh merchant profile.',
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _profileRefreshError = 'Unable to refresh your profile. Check your connection and try again.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isRefreshingProfile = false);
+    }
   }
 
   void _onNavigationSelected(int index) {
@@ -84,25 +128,41 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen> {
       backgroundColor: _canvas,
       body: SafeArea(
         bottom: false,
-        child: SingleChildScrollView(
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 560),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 14, 20, 32),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _buildBrandBar(),
-                    const SizedBox(height: 24),
-                    _buildGreeting(),
-                    const SizedBox(height: 20),
-                    const _MerchantBalanceCard(),
-                    const SizedBox(height: 16),
-                    _buildCreateRequestButton(),
-                    const SizedBox(height: 28),
-                    _buildRecentPayments(),
-                  ],
+        child: RefreshIndicator(
+          onRefresh: _refreshProfile,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 560),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 32),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _buildBrandBar(),
+                      const SizedBox(height: 24),
+                      _buildGreeting(),
+                      const SizedBox(height: 20),
+                      const _MerchantBalanceCard(),
+                      const SizedBox(height: 16),
+                      _buildCreateRequestButton(),
+                      const SizedBox(height: 28),
+                      _buildRecentPayments(),
+                      if (_profileRefreshError != null) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          _profileRefreshError!,
+                          key: const Key('merchantProfileRefreshError'),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: _supporting,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -116,18 +176,7 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen> {
   Widget _buildBrandBar() {
     return Row(
       children: [
-        Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(
-            color: _electric.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: const Icon(
-            Icons.account_balance_wallet_rounded,
-            color: _electric,
-          ),
-        ),
+        const MerchantBrandLogo(height: 30),
         const SizedBox(width: 12),
         Expanded(
           child: Column(

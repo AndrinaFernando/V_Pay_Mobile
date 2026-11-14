@@ -404,6 +404,13 @@ void main() {
         entry.key == 'EXPIRED' ? findsWidgets : findsOneWidget,
         reason: entry.key,
       );
+      expect(
+        find.byType(RefreshIndicator),
+        entry.key == 'PENDING' || entry.key == 'PROCESSING'
+            ? findsOneWidget
+            : findsNothing,
+        reason: 'Only active requests can be manually refreshed',
+      );
       expect(service.statusCalls, 1, reason: entry.key);
       await tester.pumpWidget(const SizedBox.shrink());
     }

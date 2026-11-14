@@ -6,6 +6,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../../../core/network/api_exception.dart';
 import '../models/merchant_payment_intent.dart';
 import '../services/payment_intent_service.dart';
+import '../widgets/merchant_brand_logo.dart';
 
 const _canvas = Color(0xFFFCF9F8);
 const _surface = Colors.white;
@@ -221,9 +222,18 @@ class _PaymentIntentQrScreenState extends State<PaymentIntentQrScreen> {
         backgroundColor: _canvas,
         foregroundColor: _ink,
         elevation: 0,
-        title: const Text(
-          'Payment Request',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+        title: const Row(
+          children: [
+            MerchantBrandLogo(height: 26),
+            SizedBox(width: 10),
+            Flexible(
+              child: Text(
+                'Payment Request',
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
         ),
       ),
       body: SafeArea(
@@ -231,45 +241,48 @@ class _PaymentIntentQrScreenState extends State<PaymentIntentQrScreen> {
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 500),
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
-              children: [
-                _buildStatusBanner(),
-                const SizedBox(height: 14),
-                _buildQrCard(),
-                const SizedBox(height: 14),
-                _buildExpiryCard(),
-                const SizedBox(height: 14),
-                _buildReferenceCard(),
-                if (_refreshError != null) ...[
-                  const SizedBox(height: 12),
-                  _buildRefreshError(),
-                ],
-                const SizedBox(height: 14),
-                Text(
-                  _instructionText,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: _secondary,
-                    fontSize: 13,
-                    height: 1.45,
-                  ),
-                ),
-                if (_currentIntent.status == 'EXPIRED' ||
-                    _currentIntent.status == 'FAILED') ...[
-                  const SizedBox(height: 20),
-                  _buildCreateNewButton(context),
-                ],
-                if (_currentIntent.status == 'SUCCESS') ...[
-                  const SizedBox(height: 20),
-                  _buildDoneButton(context),
-                ],
-              ],
-            ),
+            child: _buildStatusContent(),
           ),
         ),
       ),
     );
+  }
+
+  Widget _buildStatusContent() {
+    final list = ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+      children: [
+        _buildStatusBanner(),
+        const SizedBox(height: 14),
+        _buildQrCard(),
+        const SizedBox(height: 14),
+        _buildExpiryCard(),
+        const SizedBox(height: 14),
+        _buildReferenceCard(),
+        if (_refreshError != null) ...[
+          const SizedBox(height: 12),
+          _buildRefreshError(),
+        ],
+        const SizedBox(height: 14),
+        Text(
+          _instructionText,
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: _secondary, fontSize: 13, height: 1.45),
+        ),
+        if (_currentIntent.status == 'EXPIRED' ||
+            _currentIntent.status == 'FAILED') ...[
+          const SizedBox(height: 20),
+          _buildCreateNewButton(context),
+        ],
+        if (_currentIntent.status == 'SUCCESS') ...[
+          const SizedBox(height: 20),
+          _buildDoneButton(context),
+        ],
+      ],
+    );
+    if (!_canRefreshStatus) return list;
+    return RefreshIndicator(onRefresh: _refreshStatus, child: list);
   }
 
   String get _instructionText {

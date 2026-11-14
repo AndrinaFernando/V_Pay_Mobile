@@ -3,7 +3,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vpay_mobile/features/auth/auth_service.dart';
 import 'package:vpay_mobile/features/auth/models/vpay_user_profile.dart';
 import 'package:vpay_mobile/features/customer/screens/customer_shell.dart';
+import 'package:vpay_mobile/features/customer_payment/models/customer_payment_preview.dart';
+import 'package:vpay_mobile/features/customer_payment/screens/customer_payment_preview_screen.dart';
 import 'package:vpay_mobile/features/customer_payment/screens/customer_qr_scanner_screen.dart';
+import 'package:vpay_mobile/features/customer_payment/services/customer_payment_preview_service.dart';
 
 const _profile = VPayUserProfile(
   uid: 'customer-uid',
@@ -16,6 +19,24 @@ const _profile = VPayUserProfile(
 class _FakeAuthService implements AuthService {
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _SuccessfulPreviewService implements CustomerPaymentPreviewService {
+  final references = <String>[];
+
+  @override
+  Future<CustomerPaymentPreview> getPreview(String paymentReference) async {
+    references.add(paymentReference);
+    return CustomerPaymentPreview(
+      merchantUid: 'merchant-uid',
+      merchantName: 'VPay Test Merchant',
+      amountMinor: 125000,
+      currency: 'LKR',
+      status: CustomerPaymentStatus.pending,
+      createdAt: DateTime.utc(2099, 1, 1),
+      expiresAt: DateTime.utc(2099, 1, 1, 0, 15),
+    );
+  }
 }
 
 CustomerQrScannerViewBuilder _controlsScannerBuilder() {
@@ -128,13 +149,17 @@ Future<void> _openScannerFromCustomerShell(WidgetTester tester) async {
 }
 
 void main() {
-  testWidgets('Customer Home opens the existing scanner flow', (tester) async {
+  testWidgets('Customer Home opens the existing scanner and preview flow', (
+    tester,
+  ) async {
+    final previewService = _SuccessfulPreviewService();
     await tester.pumpWidget(
       MaterialApp(
         home: CustomerShell(
           profile: _profile,
           authService: _FakeAuthService(),
           qrScannerBuilder: _controlsScannerBuilder(),
+          paymentPreviewService: previewService,
         ),
       ),
     );
@@ -147,10 +172,9 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('emitValidQr')));
     await tester.pumpAndSettle();
 
-    expect(
-      find.text('QR captured. Payment verification is not implemented yet.'),
-      findsOneWidget,
-    );
+    expect(find.byType(CustomerPaymentPreviewScreen), findsOneWidget);
+    expect(find.text('VPay Test Merchant'), findsOneWidget);
+    expect(previewService.references, ['payment-ref-123']);
   });
 
   testWidgets('CustomerShell opens and closes the scanner without a result', (
@@ -162,6 +186,7 @@ void main() {
           profile: _profile,
           authService: _FakeAuthService(),
           qrScannerBuilder: _controlsScannerBuilder(),
+          paymentPreviewService: _SuccessfulPreviewService(),
         ),
       ),
     );
@@ -173,10 +198,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(CustomerQrScannerScreen), findsNothing);
-    expect(
-      find.text('QR captured. Payment verification is not implemented yet.'),
-      findsNothing,
-    );
+    expect(find.byType(CustomerPaymentPreviewScreen), findsNothing);
   });
 
   testWidgets('returns a trimmed non-empty payment reference', (tester) async {
@@ -240,30 +262,31 @@ void main() {
     expect(results, ['first-reference']);
   });
 
-  testWidgets(
-    'CustomerShell reports capture without claiming payment success',
-    (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          home: CustomerShell(
-            profile: _profile,
-            authService: _FakeAuthService(),
-            qrScannerBuilder: _controlsScannerBuilder(),
-          ),
+  testWidgets('CustomerShell opens preview without claiming payment success', (
+    tester,
+  ) async {
+    final previewService = _SuccessfulPreviewService();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CustomerShell(
+          profile: _profile,
+          authService: _FakeAuthService(),
+          qrScannerBuilder: _controlsScannerBuilder(),
+          paymentPreviewService: previewService,
         ),
-      );
+      ),
+    );
 
-      await _openScannerFromCustomerShell(tester);
-      await tester.tap(find.byKey(const ValueKey('emitValidQr')));
-      await tester.pumpAndSettle();
+    await _openScannerFromCustomerShell(tester);
+    await tester.tap(find.byKey(const ValueKey('emitValidQr')));
+    await tester.pumpAndSettle();
 
-      expect(
-        find.text('QR captured. Payment verification is not implemented yet.'),
-        findsOneWidget,
-      );
-      expect(find.textContaining('successful'), findsNothing);
-    },
-  );
+    expect(find.byType(CustomerPaymentPreviewScreen), findsOneWidget);
+    expect(find.text('Payment confirmation unavailable'), findsOneWidget);
+    expect(find.textContaining('No payment has been made'), findsOneWidget);
+    expect(find.textContaining('Payment successful'), findsNothing);
+    expect(previewService.references, ['payment-ref-123']);
+  });
 
   testWidgets('shows permission and camera initialization errors', (
     tester,

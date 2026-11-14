@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/network/api_exception.dart';
 import '../customer/screens/customer_shell.dart';
+import '../merchant/screens/merchant_dashboard_screen.dart';
 import 'app_access_gate.dart';
 import 'auth_service.dart';
 import 'models/user_profile_result.dart';
@@ -66,14 +67,16 @@ class _VPayAccountGateState extends State<VPayAccountGate> {
           final profile = result!.user!;
           return AppAccessGate(
             authService: widget.authService,
-            child: profile.role == 'CUSTOMER'
-                ? CustomerShell(
-                    profile: profile,
-                    authService: widget.authService,
-                  )
-                : AuthenticatedPlaceholderScreen(
-                    authService: widget.authService,
-                  ),
+            child: switch (profile.role) {
+              'CUSTOMER' => CustomerShell(
+                profile: profile,
+                authService: widget.authService,
+              ),
+              'MERCHANT' => MerchantDashboardScreen(profile: profile),
+              _ => AuthenticatedPlaceholderScreen(
+                authService: widget.authService,
+              ),
+            },
           );
         }
 

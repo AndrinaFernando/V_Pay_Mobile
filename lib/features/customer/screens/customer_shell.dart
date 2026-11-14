@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../auth/auth_service.dart';
 import '../../auth/models/vpay_user_profile.dart';
+import '../../customer_payment/screens/customer_payment_preview_screen.dart';
 import '../../customer_payment/screens/customer_qr_scanner_screen.dart';
+import '../../customer_payment/services/customer_payment_preview_service.dart';
 import 'customer_home_screen.dart';
 
 const _electric = Color(0xFF0072DC);
@@ -15,11 +17,13 @@ class CustomerShell extends StatefulWidget {
     required this.profile,
     required this.authService,
     this.qrScannerBuilder,
+    this.paymentPreviewService,
   });
 
   final VPayUserProfile profile;
   final AuthService authService;
   final CustomerQrScannerViewBuilder? qrScannerBuilder;
+  final CustomerPaymentPreviewService? paymentPreviewService;
 
   @override
   State<CustomerShell> createState() => _CustomerShellState();
@@ -69,12 +73,11 @@ class _CustomerShellState extends State<CustomerShell> {
 
     if (!mounted || paymentReference == null) return;
 
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(
-      const SnackBar(
-        content: Text(
-          'QR captured. Payment verification is not implemented yet.',
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (context) => CustomerPaymentPreviewScreen(
+          paymentReference: paymentReference,
+          previewService: widget.paymentPreviewService,
         ),
       ),
     );

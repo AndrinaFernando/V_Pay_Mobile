@@ -5,6 +5,7 @@ class VPayUserProfile {
     required this.email,
     required this.role,
     required this.status,
+    this.businessName,
   });
 
   final String uid;
@@ -12,6 +13,7 @@ class VPayUserProfile {
   final String email;
   final String role;
   final String status;
+  final String? businessName;
 
   factory VPayUserProfile.fromJson(Map<String, dynamic> json) {
     return VPayUserProfile(
@@ -20,6 +22,7 @@ class VPayUserProfile {
       email: json['email'] as String,
       role: json['role'] as String,
       status: json['status'] as String,
+      businessName: json['businessName'] as String?,
     );
   }
 }

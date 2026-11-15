@@ -58,9 +58,14 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
   }
 
   Future<void> _openTopUp() async {
-    await Navigator.of(context)
-        .push(MaterialPageRoute<void>(builder: (_) => const TopUpScreen()));
-    if (mounted) _retry();
+    final result = await Navigator.of(context)
+        .push(MaterialPageRoute<String>(builder: (_) => const TopUpScreen()));
+    if (!mounted) return;
+    _retry();
+    if (result != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(result)));
+    }
   }
 
   String get _firstName {

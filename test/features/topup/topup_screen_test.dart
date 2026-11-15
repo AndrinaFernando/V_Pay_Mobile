@@ -5,6 +5,7 @@ import 'package:vpay_mobile/features/topup/services/topup_service.dart';
 
 class FakeTopUpService implements TopUpService {
   int? createdAmount;
+  List<TopUp> history = [];
   TopUp current = const TopUp(
     id: 'topup1',
     status: 'PENDING',
@@ -20,45 +21,116 @@ class FakeTopUpService implements TopUpService {
   @override
   Future<TopUp> get(String id) async => current;
   @override
-  Future<List<TopUp>> list() async => [];
+  Future<List<TopUp>> list() async => history;
 }
 
 void main() {
-  testWidgets('starts checkout and shows only backend-confirmed result', (
+  testWidgets('history opens on a separate screen and shows details', (
+    tester,
+  ) async {
+    final service = FakeTopUpService()
+      ..history = [
+        const TopUp(
+          id: 'history1',
+          status: 'SUCCESS',
+          requestedAmount: 50,
+          amount: 50,
+        ),
+      ];
+    await tester.pumpWidget(MaterialApp(home: TopUpScreen(service: service)));
+    expect(find.text('Top-up successful'), findsNothing);
+    await tester.tap(find.text('Top-up history'));
+    await tester.pumpAndSettle();
+    expect(find.text('Top-up successful'), findsOneWidget);
+    await tester.tap(find.text('Top-up successful'));
+    await tester.pumpAndSettle();
+    expect(find.text('Reference: history1'), findsWidgets);
+  });
+  testWidgets('returns to home with the backend-confirmed checkout result', (
     tester,
   ) async {
     final service = FakeTopUpService();
-    Uri? opened;
+    String? result;
     await tester.pumpWidget(
       MaterialApp(
-        home: TopUpScreen(
-          service: service,
-          openCheckout: (uri) async {
-            opened = uri;
-            return true;
-          },
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () async {
+                result = await Navigator.of(context).push<String>(
+                  MaterialPageRoute(
+                    builder: (_) => TopUpScreen(
+                      service: service,
+                      checkoutBuilder: (url, id, api) => Scaffold(
+                        body: TextButton(
+                          onPressed: () async {
+                            final confirmed = await api.get(id);
+                            if (context.mounted)
+                              Navigator.of(context).pop(confirmed);
+                          },
+                          child: const Text('Confirm result'),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+              child: const Text('Home'),
+            ),
+          ),
         ),
       ),
     );
-    await tester.pump();
+    await tester.tap(find.text('Home'));
+    await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '100');
     await tester.tap(find.text('Continue to Rupio'));
-    await tester.pump();
-    expect(service.createdAmount, 100);
-    expect(opened.toString(), 'https://rupio.example/checkout');
-    expect(find.text('Waiting for payment confirmation'), findsWidgets);
-    expect(find.text('Top-up successful'), findsNothing);
+    await tester.pumpAndSettle();
+    expect(find.text('Confirm result'), findsOneWidget);
     service.current = const TopUp(
       id: 'topup1',
       status: 'SUCCESS',
       requestedAmount: 100,
-      amount: 120,
-      message: 'Approved',
+      amount: 100,
     );
-    await tester.tap(find.text('Check status'));
-    await tester.pump();
-    expect(find.text('Top-up successful'), findsWidgets);
-    expect(find.text('Final amount: Rs. 120'), findsOneWidget);
+    await tester.tap(find.text('Confirm result'));
+    await tester.pumpAndSettle();
+    expect(find.text('Home'), findsOneWidget);
+    expect(result, 'Top-up successful');
+  });
+  testWidgets('leaving checkout restores the amount screen and keeps history', (
+    tester,
+  ) async {
+    final service = FakeTopUpService();
+    service.history = [service.current];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TopUpScreen(
+          service: service,
+          checkoutBuilder: (uri, id, api) => Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Leave checkout'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '100');
+    await tester.tap(find.text('Continue to Rupio'));
+    await tester.pumpAndSettle();
+    expect(service.createdAmount, 100);
+    expect(find.text('Leave checkout'), findsOneWidget);
+    await tester.tap(find.text('Leave checkout'));
+    await tester.pumpAndSettle();
+    expect(find.text('Waiting for payment confirmation'), findsNothing);
+    expect(find.text('Continue to Rupio'), findsOneWidget);
+    await tester.tap(find.text('Top-up history'));
+    await tester.pumpAndSettle();
+    expect(find.text('Waiting for payment confirmation'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 

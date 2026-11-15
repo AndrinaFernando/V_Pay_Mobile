@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "96976715105",
+    "project_id": "vpay-ca8cc",
+    "storage_bucket": "vpay-ca8cc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:96976715105:android:52902ee84510da54a11920",
+        "android_client_info": {
+          "package_name": "com.vpay.vpay_mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD-NosIkT8ngzo6lGPnrqDpNzrcM-Y_NDM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

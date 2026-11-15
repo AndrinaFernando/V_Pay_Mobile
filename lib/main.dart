@@ -1,6 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
 
-void main() {
+import 'features/auth/auth_gate.dart';
+import 'firebase_options.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
   runApp(const MyApp());
 }
 
@@ -30,7 +38,7 @@ class MyApp extends StatelessWidget {
         // tested with just a hot reload.
         colorScheme: .fromSeed(seedColor: Colors.deepPurple),
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      home: const AuthGate(),
     );
   }
 }

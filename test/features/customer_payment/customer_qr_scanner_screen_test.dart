@@ -282,8 +282,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(CustomerPaymentPreviewScreen), findsOneWidget);
-    expect(find.text('Payment confirmation unavailable'), findsOneWidget);
-    expect(find.textContaining('No payment has been made'), findsOneWidget);
+    expect(find.text('Confirm Payment'), findsOneWidget);
+    expect(find.textContaining('authenticate on this device'), findsOneWidget);
     expect(find.textContaining('Payment successful'), findsNothing);
     expect(previewService.references, ['payment-ref-123']);
   });

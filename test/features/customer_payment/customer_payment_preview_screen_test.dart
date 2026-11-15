@@ -2,8 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vpay_mobile/core/security/local_auth_service.dart';
 import 'package:vpay_mobile/features/customer_payment/models/customer_payment_preview.dart';
+import 'package:vpay_mobile/features/customer_payment/models/customer_payment_result.dart';
 import 'package:vpay_mobile/features/customer_payment/screens/customer_payment_preview_screen.dart';
+import 'package:vpay_mobile/features/customer_payment/services/customer_payment_confirmation_service.dart';
 import 'package:vpay_mobile/features/customer_payment/services/customer_payment_preview_service.dart';
 
 typedef _PreviewResponse = Future<CustomerPaymentPreview> Function();
@@ -19,6 +22,49 @@ class _FakePreviewService implements CustomerPaymentPreviewService {
   Future<CustomerPaymentPreview> getPreview(String paymentReference) {
     references.add(paymentReference);
     return _responses.removeAt(0)();
+  }
+}
+
+class _FakeLocalAuthService implements LocalAuthService {
+  _FakeLocalAuthService(this.authenticate);
+
+  final Future<bool> Function(String reason) authenticate;
+  final reasons = <String>[];
+
+  @override
+  Future<bool> authenticateForSensitiveAction({required String reason}) {
+    reasons.add(reason);
+    return authenticate(reason);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+typedef _PaymentResponse = Future<CustomerPaymentResult> Function();
+
+class _FakeConfirmationService implements CustomerPaymentConfirmationService {
+  _FakeConfirmationService({
+    required List<_PaymentResponse> confirmations,
+    List<_PaymentResponse> statuses = const [],
+  }) : _confirmations = List.of(confirmations),
+       _statuses = List.of(statuses);
+
+  final List<_PaymentResponse> _confirmations;
+  final List<_PaymentResponse> _statuses;
+  final confirmationReferences = <String>[];
+  final statusReferences = <String>[];
+
+  @override
+  Future<CustomerPaymentResult> confirmPayment(String paymentReference) {
+    confirmationReferences.add(paymentReference);
+    return _confirmations.removeAt(0)();
+  }
+
+  @override
+  Future<CustomerPaymentResult> getPaymentStatus(String paymentReference) {
+    statusReferences.add(paymentReference);
+    return _statuses.removeAt(0)();
   }
 }
 
@@ -39,18 +85,52 @@ CustomerPaymentPreview _preview({
   );
 }
 
+CustomerPaymentResult _paymentResult({
+  CustomerPaymentStatus status = CustomerPaymentStatus.success,
+  String paymentReference = 'payment-ref-123',
+  int amountMinor = 1285050,
+  String currency = 'LKR',
+}) {
+  if (status != CustomerPaymentStatus.success) {
+    return CustomerPaymentResult(
+      paymentReference: paymentReference,
+      status: status,
+    );
+  }
+  return CustomerPaymentResult(
+    transactionId: 'qr-payment--$paymentReference',
+    paymentReference: paymentReference,
+    merchantName: 'Colombo Cafe',
+    amountMinor: amountMinor,
+    currency: currency,
+    status: status,
+    paidAt: DateTime.utc(2099, 2, 3, 8, 5),
+  );
+}
+
 Future<void> _pumpPreview(
   WidgetTester tester,
-  CustomerPaymentPreviewService service,
-) async {
+  CustomerPaymentPreviewService service, {
+  CustomerPaymentConfirmationService? confirmationService,
+  LocalAuthService? localAuthService,
+}) async {
   await tester.pumpWidget(
     MaterialApp(
       home: CustomerPaymentPreviewScreen(
         paymentReference: 'payment-ref-123',
         previewService: service,
+        confirmationService: confirmationService,
+        localAuthService: localAuthService,
       ),
     ),
   );
+}
+
+Future<void> _tapConfirm(WidgetTester tester) async {
+  final button = find.byKey(const ValueKey('confirmPaymentButton'));
+  await tester.ensureVisible(button);
+  await tester.pumpAndSettle();
+  await tester.tap(button);
 }
 
 void main() {
@@ -101,19 +181,271 @@ void main() {
     expect(find.text('Lunch order'), findsOneWidget);
     expect(find.text('PENDING'), findsAtLeastNWidgets(1));
     expect(find.textContaining('2099-02-03'), findsOneWidget);
-    expect(find.text('Payment confirmation unavailable'), findsOneWidget);
+    expect(find.text('Confirm Payment'), findsOneWidget);
+    expect(
+      find.text(
+        'Review these verified details, then select Confirm Payment to continue.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('not implemented'), findsNothing);
     expect(
       tester
           .widget<FilledButton>(
             find.ancestor(
-              of: find.text('Payment confirmation unavailable'),
+              of: find.text('Confirm Payment'),
               matching: find.byType(FilledButton),
             ),
           )
           .onPressed,
-      isNull,
+      isNotNull,
     );
     expect(service.references, ['payment-ref-123']);
+  });
+
+  testWidgets('authenticates before submitting and shows confirmed success', (
+    tester,
+  ) async {
+    final auth = _FakeLocalAuthService((_) async => true);
+    final confirmation = _FakeConfirmationService(
+      confirmations: [() async => _paymentResult()],
+    );
+
+    await _pumpPreview(
+      tester,
+      _FakePreviewService([() async => _preview()]),
+      confirmationService: confirmation,
+      localAuthService: auth,
+    );
+    await tester.pumpAndSettle();
+    await _tapConfirm(tester);
+    await tester.pumpAndSettle();
+
+    expect(auth.reasons, ['Authenticate to pay Rs. 12,850.50 to Colombo Cafe']);
+    expect(confirmation.confirmationReferences, ['payment-ref-123']);
+    expect(find.text('Payment successful'), findsOneWidget);
+    expect(find.text('qr-payment--payment-ref-123'), findsOneWidget);
+  });
+
+  testWidgets('does not submit when device authentication is cancelled', (
+    tester,
+  ) async {
+    final auth = _FakeLocalAuthService((_) async => false);
+    final confirmation = _FakeConfirmationService(confirmations: []);
+
+    await _pumpPreview(
+      tester,
+      _FakePreviewService([() async => _preview()]),
+      confirmationService: confirmation,
+      localAuthService: auth,
+    );
+    await tester.pumpAndSettle();
+    await _tapConfirm(tester);
+    await tester.pumpAndSettle();
+
+    expect(confirmation.confirmationReferences, isEmpty);
+    expect(find.textContaining('No payment was submitted'), findsOneWidget);
+  });
+
+  testWidgets('does not submit when device authentication fails', (
+    tester,
+  ) async {
+    final auth = _FakeLocalAuthService(
+      (_) => Future<bool>.error(StateError('authentication unavailable')),
+    );
+    final confirmation = _FakeConfirmationService(confirmations: []);
+
+    await _pumpPreview(
+      tester,
+      _FakePreviewService([() async => _preview()]),
+      confirmationService: confirmation,
+      localAuthService: auth,
+    );
+    await tester.pumpAndSettle();
+    await _tapConfirm(tester);
+    await tester.pumpAndSettle();
+
+    expect(confirmation.confirmationReferences, isEmpty);
+    expect(find.textContaining('could not be completed'), findsOneWidget);
+  });
+
+  testWidgets('ignores duplicate confirmation taps while work is in progress', (
+    tester,
+  ) async {
+    final authCompleter = Completer<bool>();
+    final confirmationCompleter = Completer<CustomerPaymentResult>();
+    final auth = _FakeLocalAuthService((_) => authCompleter.future);
+    final confirmation = _FakeConfirmationService(
+      confirmations: [() => confirmationCompleter.future],
+    );
+
+    await _pumpPreview(
+      tester,
+      _FakePreviewService([() async => _preview()]),
+      confirmationService: confirmation,
+      localAuthService: auth,
+    );
+    await tester.pumpAndSettle();
+    await _tapConfirm(tester);
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('confirmPaymentButton')));
+    await tester.pump();
+    expect(auth.reasons, hasLength(1));
+
+    authCompleter.complete(true);
+    await tester.pump();
+    await tester.pump();
+    expect(confirmation.confirmationReferences, hasLength(1));
+    await tester.tap(find.byKey(const ValueKey('confirmPaymentButton')));
+    await tester.pump();
+    expect(confirmation.confirmationReferences, hasLength(1));
+
+    confirmationCompleter.complete(_paymentResult());
+    await tester.pumpAndSettle();
+    expect(find.text('Payment successful'), findsOneWidget);
+  });
+
+  testWidgets('shows a clear known backend rejection', (tester) async {
+    final confirmation = _FakeConfirmationService(
+      confirmations: [
+        () => Future.error(
+          const CustomerPaymentConfirmationException(
+            CustomerPaymentConfirmationFailure.minimumBalanceRequired,
+          ),
+        ),
+      ],
+    );
+
+    await _pumpPreview(
+      tester,
+      _FakePreviewService([() async => _preview()]),
+      confirmationService: confirmation,
+      localAuthService: _FakeLocalAuthService((_) async => true),
+    );
+    await tester.pumpAndSettle();
+    await _tapConfirm(tester);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining('required Rs. 500 retained balance'),
+      findsOneWidget,
+    );
+    expect(find.text('Payment successful'), findsNothing);
+  });
+
+  testWidgets('recovers a timed-out confirmation through status only', (
+    tester,
+  ) async {
+    final confirmation = _FakeConfirmationService(
+      confirmations: [
+        () => Future.error(
+          const CustomerPaymentConfirmationException(
+            CustomerPaymentConfirmationFailure.ambiguousNetwork,
+          ),
+        ),
+      ],
+      statuses: [() async => _paymentResult()],
+    );
+
+    await _pumpPreview(
+      tester,
+      _FakePreviewService([() async => _preview()]),
+      confirmationService: confirmation,
+      localAuthService: _FakeLocalAuthService((_) async => true),
+    );
+    await tester.pumpAndSettle();
+    await _tapConfirm(tester);
+    await tester.pumpAndSettle();
+
+    expect(confirmation.confirmationReferences, ['payment-ref-123']);
+    expect(confirmation.statusReferences, ['payment-ref-123']);
+    expect(find.text('Payment successful'), findsOneWidget);
+  });
+
+  testWidgets('recovers a mismatched receipt amount through status only', (
+    tester,
+  ) async {
+    final confirmation = _FakeConfirmationService(
+      confirmations: [() async => _paymentResult(amountMinor: 1285051)],
+      statuses: [() async => _paymentResult()],
+    );
+
+    await _pumpPreview(
+      tester,
+      _FakePreviewService([() async => _preview()]),
+      confirmationService: confirmation,
+      localAuthService: _FakeLocalAuthService((_) async => true),
+    );
+    await tester.pumpAndSettle();
+    await _tapConfirm(tester);
+    await tester.pumpAndSettle();
+
+    expect(confirmation.confirmationReferences, ['payment-ref-123']);
+    expect(confirmation.statusReferences, ['payment-ref-123']);
+    expect(find.text('Payment successful'), findsOneWidget);
+    expect(find.text('Rs. 12,850.50'), findsOneWidget);
+  });
+
+  testWidgets('keeps a mismatched receipt currency uncertain', (tester) async {
+    final confirmation = _FakeConfirmationService(
+      confirmations: [() async => _paymentResult(currency: 'USD')],
+      statuses: [() async => _paymentResult(currency: 'USD')],
+    );
+
+    await _pumpPreview(
+      tester,
+      _FakePreviewService([() async => _preview()]),
+      confirmationService: confirmation,
+      localAuthService: _FakeLocalAuthService((_) async => true),
+    );
+    await tester.pumpAndSettle();
+    await _tapConfirm(tester);
+    await tester.pumpAndSettle();
+
+    expect(confirmation.confirmationReferences, ['payment-ref-123']);
+    expect(confirmation.statusReferences, ['payment-ref-123']);
+    expect(find.text('Payment result unknown'), findsOneWidget);
+    expect(find.textContaining('do not match'), findsOneWidget);
+    expect(find.text('Payment successful'), findsNothing);
+  });
+
+  testWidgets('shows an unknown result when status recovery also fails', (
+    tester,
+  ) async {
+    final confirmation = _FakeConfirmationService(
+      confirmations: [
+        () => Future.error(
+          const CustomerPaymentConfirmationException(
+            CustomerPaymentConfirmationFailure.ambiguousNetwork,
+          ),
+        ),
+      ],
+      statuses: [
+        () => Future.error(
+          const CustomerPaymentConfirmationException(
+            CustomerPaymentConfirmationFailure.ambiguousNetwork,
+          ),
+        ),
+      ],
+    );
+
+    await _pumpPreview(
+      tester,
+      _FakePreviewService([() async => _preview()]),
+      confirmationService: confirmation,
+      localAuthService: _FakeLocalAuthService((_) async => true),
+    );
+    await tester.pumpAndSettle();
+    await _tapConfirm(tester);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Payment result unknown'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('checkPaymentStatusButton')),
+      findsOneWidget,
+    );
+    expect(confirmation.confirmationReferences, hasLength(1));
+    expect(confirmation.statusReferences, hasLength(1));
   });
 
   testWidgets('retries a failed read-only lookup safely', (tester) async {

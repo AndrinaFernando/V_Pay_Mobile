@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/security/local_auth_service.dart';
 import '../models/customer_payment_preview.dart';
+import '../models/customer_payment_result.dart';
+import '../services/customer_payment_confirmation_service.dart';
 import '../services/customer_payment_preview_service.dart';
 
 const _electric = Color(0xFF0072DC);
@@ -19,10 +22,14 @@ class CustomerPaymentPreviewScreen extends StatefulWidget {
     super.key,
     required this.paymentReference,
     this.previewService,
+    this.confirmationService,
+    this.localAuthService,
   });
 
   final String paymentReference;
   final CustomerPaymentPreviewService? previewService;
+  final CustomerPaymentConfirmationService? confirmationService;
+  final LocalAuthService? localAuthService;
 
   @override
   State<CustomerPaymentPreviewScreen> createState() =>
@@ -32,9 +39,17 @@ class CustomerPaymentPreviewScreen extends StatefulWidget {
 class _CustomerPaymentPreviewScreenState
     extends State<CustomerPaymentPreviewScreen> {
   late final CustomerPaymentPreviewService _previewService;
+  CustomerPaymentConfirmationService? _confirmationService;
+  late final LocalAuthService _localAuthService;
   CustomerPaymentPreview? _preview;
   CustomerPaymentPreviewFailure? _failure;
+  CustomerPaymentResult? _paymentResult;
+  String? _confirmationMessage;
   bool _isLoading = true;
+  bool _isConfirming = false;
+  bool _isCheckingStatus = false;
+  bool _isPaymentResultUnknown = false;
+  String? _unknownResultMessage;
   int _requestGeneration = 0;
 
   @override
@@ -42,7 +57,130 @@ class _CustomerPaymentPreviewScreenState
     super.initState();
     _previewService =
         widget.previewService ?? ApiCustomerPaymentPreviewService();
+    _confirmationService = widget.confirmationService;
+    _localAuthService = widget.localAuthService ?? LocalAuthService();
     _loadPreview();
+  }
+
+  Future<void> _confirmPayment() async {
+    if (_isConfirming || _isCheckingStatus) return;
+    final preview = _preview;
+    if (preview == null ||
+        preview.status != CustomerPaymentStatus.pending ||
+        preview.isExpiredAt(DateTime.now())) {
+      return;
+    }
+
+    setState(() {
+      _isConfirming = true;
+      _confirmationMessage = null;
+    });
+
+    var authenticated = false;
+    try {
+      authenticated = await _localAuthService.authenticateForSensitiveAction(
+        reason:
+            'Authenticate to pay ${formatLkrMinor(preview.amountMinor)} to ${preview.merchantName}',
+      );
+    } catch (_) {
+      authenticated = false;
+    }
+
+    if (!mounted) return;
+    if (!authenticated) {
+      setState(() {
+        _isConfirming = false;
+        _confirmationMessage = 'Device authentication was cancelled or could not be completed. No payment was submitted.';
+      });
+      return;
+    }
+
+    try {
+      final result = await _paymentConfirmationService.confirmPayment(
+        widget.paymentReference,
+      );
+      if (!mounted) return;
+      if (!result.matchesApprovedPreview(preview)) {
+        await _checkPaymentStatus(afterInconsistentReceipt: true);
+        return;
+      }
+      setState(() {
+        _paymentResult = result;
+        _isConfirming = false;
+      });
+    } on CustomerPaymentConfirmationException catch (error) {
+      if (!mounted) return;
+      if (error.failure ==
+              CustomerPaymentConfirmationFailure.ambiguousNetwork ||
+          error.failure == CustomerPaymentConfirmationFailure.invalidResponse) {
+        await _checkPaymentStatus(afterAmbiguousConfirmation: true);
+        return;
+      }
+      setState(() {
+        _isConfirming = false;
+        _confirmationMessage = _confirmationFailureMessage(error.failure);
+      });
+    } catch (_) {
+      if (!mounted) return;
+      await _checkPaymentStatus(afterAmbiguousConfirmation: true);
+    }
+  }
+
+  Future<void> _checkPaymentStatus({
+    bool afterAmbiguousConfirmation = false,
+    bool afterInconsistentReceipt = false,
+  }) async {
+    if (_isCheckingStatus) return;
+    setState(() {
+      _isCheckingStatus = true;
+      _isPaymentResultUnknown = false;
+      _unknownResultMessage = null;
+      if (afterAmbiguousConfirmation) {
+        _confirmationMessage = 'The confirmation response was interrupted. Checking payment status without resubmitting…';
+      } else if (afterInconsistentReceipt) {
+        _confirmationMessage = 'The receipt did not match the payment you approved. Checking the authoritative payment status…';
+      }
+    });
+
+    try {
+      final result = await _paymentConfirmationService.getPaymentStatus(
+        widget.paymentReference,
+      );
+      if (!mounted) return;
+      final preview = _preview;
+      if (result.status == CustomerPaymentStatus.success &&
+          (preview == null || !result.matchesApprovedPreview(preview))) {
+        setState(() {
+          _paymentResult = null;
+          _isConfirming = false;
+          _isCheckingStatus = false;
+          _isPaymentResultUnknown = true;
+          _unknownResultMessage = 'VPay returned payment details that do not match the payment you approved. Do not confirm again. Contact support with the payment reference.';
+          _confirmationMessage = null;
+        });
+        return;
+      }
+      setState(() {
+        _paymentResult = result;
+        _isConfirming = false;
+        _isCheckingStatus = false;
+        _confirmationMessage = null;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _paymentResult = null;
+        _isConfirming = false;
+        _isCheckingStatus = false;
+        _isPaymentResultUnknown = true;
+        _unknownResultMessage = 'VPay could not determine the final result. Do not confirm again; check the payment status when connectivity returns.';
+        _confirmationMessage = null;
+      });
+    }
+  }
+
+  CustomerPaymentConfirmationService get _paymentConfirmationService {
+    return _confirmationService ??= ApiCustomerPaymentConfirmationService();
   }
 
   Future<void> _loadPreview() async {
@@ -116,6 +254,19 @@ class _CustomerPaymentPreviewScreenState
   }
 
   Widget _buildBody() {
+    final paymentResult = _paymentResult;
+    if (paymentResult != null || _isPaymentResultUnknown) {
+      return _PaymentResolutionView(
+        key: const ValueKey('paymentResolution'),
+        result: paymentResult,
+        isUnknown: _isPaymentResultUnknown,
+        unknownMessage: _unknownResultMessage,
+        isCheckingStatus: _isCheckingStatus,
+        onCheckStatus: () => _checkPaymentStatus(),
+        onDone: () => Navigator.of(context).pop(),
+      );
+    }
+
     if (_isLoading) {
       return _PreviewLoading(
         key: const ValueKey('paymentPreviewLoading'),
@@ -136,6 +287,10 @@ class _CustomerPaymentPreviewScreenState
       key: const ValueKey('paymentPreviewDetails'),
       paymentReference: widget.paymentReference,
       preview: _preview!,
+      isConfirming: _isConfirming,
+      isCheckingStatus: _isCheckingStatus,
+      confirmationMessage: _confirmationMessage,
+      onConfirm: _confirmPayment,
     );
   }
 }
@@ -267,14 +422,26 @@ class _PreviewDetails extends StatelessWidget {
     super.key,
     required this.paymentReference,
     required this.preview,
+    required this.isConfirming,
+    required this.isCheckingStatus,
+    required this.confirmationMessage,
+    required this.onConfirm,
   });
 
   final String paymentReference;
   final CustomerPaymentPreview preview;
+  final bool isConfirming;
+  final bool isCheckingStatus;
+  final String? confirmationMessage;
+  final VoidCallback onConfirm;
 
   @override
   Widget build(BuildContext context) {
     final status = _statusPresentation(preview, DateTime.now());
+    final canConfirm =
+        preview.status == CustomerPaymentStatus.pending &&
+        !preview.isExpiredAt(DateTime.now());
+    final isBusy = isConfirming || isCheckingStatus;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
@@ -377,35 +544,237 @@ class _PreviewDetails extends StatelessWidget {
                   ],
                 ),
               ),
+              if (confirmationMessage != null) ...[
+                const SizedBox(height: 16),
+                Container(
+                  key: const ValueKey('paymentConfirmationMessage'),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: _warning.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: _warning.withValues(alpha: 0.24)),
+                  ),
+                  child: Text(
+                    confirmationMessage!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: _body,
+                      fontSize: 13,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 20),
               SizedBox(
                 height: 52,
                 child: FilledButton.icon(
                   key: const ValueKey('confirmPaymentButton'),
-                  onPressed: null,
+                  onPressed: canConfirm && !isBusy ? onConfirm : null,
                   style: FilledButton.styleFrom(
+                    backgroundColor: _electric,
+                    foregroundColor: Colors.white,
                     disabledBackgroundColor: _divider,
                     disabledForegroundColor: _secondary,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16),
                     ),
                   ),
-                  icon: const Icon(Icons.lock_outline_rounded),
-                  label: const Text(
-                    'Payment confirmation unavailable',
-                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                  icon: isBusy
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: _secondary,
+                          ),
+                        )
+                      : const Icon(Icons.lock_outline_rounded),
+                  label: Text(
+                    isCheckingStatus
+                        ? 'Checking payment status…'
+                        : isConfirming
+                        ? 'Confirming securely…'
+                        : canConfirm
+                        ? 'Confirm Payment'
+                        : 'Payment confirmation unavailable',
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ),
               const SizedBox(height: 10),
-              const Text(
-                'No payment has been made. Confirmation will be enabled in a future step.',
+              Text(
+                canConfirm
+                    ? 'You will authenticate on this device before VPay submits the payment reference.'
+                    : 'No new payment can be submitted for this payment request.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: _secondary, fontSize: 12, height: 1.4),
+                style: const TextStyle(
+                  color: _secondary,
+                  fontSize: 12,
+                  height: 1.4,
+                ),
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _PaymentResolutionView extends StatelessWidget {
+  const _PaymentResolutionView({
+    super.key,
+    required this.result,
+    required this.isUnknown,
+    required this.unknownMessage,
+    required this.isCheckingStatus,
+    required this.onCheckStatus,
+    required this.onDone,
+  });
+
+  final CustomerPaymentResult? result;
+  final bool isUnknown;
+  final String? unknownMessage;
+  final bool isCheckingStatus;
+  final VoidCallback onCheckStatus;
+  final VoidCallback onDone;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = result?.status;
+    final isSuccess = status == CustomerPaymentStatus.success;
+    final canCheckAgain =
+        isUnknown ||
+        status == CustomerPaymentStatus.pending ||
+        status == CustomerPaymentStatus.processing;
+    final title = switch (status) {
+      CustomerPaymentStatus.success => 'Payment successful',
+      CustomerPaymentStatus.pending => 'Payment still pending',
+      CustomerPaymentStatus.processing => 'Payment processing',
+      CustomerPaymentStatus.failed => 'Payment failed',
+      CustomerPaymentStatus.expired => 'Payment expired',
+      null => 'Payment result unknown',
+    };
+    final message = switch (status) {
+      CustomerPaymentStatus.success =>
+        'VPay confirmed the payment and verified the server receipt.',
+      CustomerPaymentStatus.pending => 'VPay reports that this payment is still pending. The confirmation request was not resubmitted.',
+      CustomerPaymentStatus.processing => 'VPay is processing this payment. Do not submit it again; check the status instead.',
+      CustomerPaymentStatus.failed => 'VPay reports that this payment failed. No successful receipt is available.',
+      CustomerPaymentStatus.expired =>
+        'This payment request expired without a successful receipt.',
+      null => unknownMessage ?? 'VPay could not determine the final result. Do not confirm again; check the status when connectivity returns.',
+    };
+
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(24, 32, 24, 40),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 440),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Icon(
+                isSuccess
+                    ? Icons.check_circle_rounded
+                    : isUnknown
+                    ? Icons.help_outline_rounded
+                    : Icons.info_outline_rounded,
+                color: isSuccess ? _success : _warning,
+                size: 72,
+              ),
+              const SizedBox(height: 20),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: _ink,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: _secondary,
+                  fontSize: 15,
+                  height: 1.45,
+                ),
+              ),
+              if (isSuccess) ...[
+                const SizedBox(height: 24),
+                _PaymentReceiptCard(result: result!),
+              ],
+              if (canCheckAgain) ...[
+                const SizedBox(height: 24),
+                OutlinedButton.icon(
+                  key: const ValueKey('checkPaymentStatusButton'),
+                  onPressed: isCheckingStatus ? null : onCheckStatus,
+                  icon: isCheckingStatus
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.refresh_rounded),
+                  label: Text(
+                    isCheckingStatus
+                        ? 'Checking status…'
+                        : 'Check Status Again',
+                  ),
+                ),
+              ],
+              const SizedBox(height: 12),
+              FilledButton(
+                key: const ValueKey('finishPaymentButton'),
+                onPressed: onDone,
+                style: FilledButton.styleFrom(
+                  backgroundColor: _electric,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size.fromHeight(52),
+                ),
+                child: const Text('Done'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PaymentReceiptCard extends StatelessWidget {
+  const _PaymentReceiptCard({required this.result});
+
+  final CustomerPaymentResult result;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _divider),
+      ),
+      child: Column(
+        children: [
+          _DetailRow(label: 'Merchant', value: result.merchantName!),
+          _DetailRow(
+            label: 'Amount',
+            value: formatLkrMinor(result.amountMinor!),
+          ),
+          _DetailRow(label: 'Transaction ID', value: result.transactionId!),
+          _DetailRow(
+            label: 'Paid at',
+            value: _formatDateTime(result.paidAt!),
+            showDivider: false,
+          ),
+        ],
       ),
     );
   }
@@ -547,7 +916,7 @@ _StatusPresentation _statusPresentation(
   return switch (preview.status) {
     CustomerPaymentStatus.pending => const _StatusPresentation(
       label: 'PENDING',
-      message: 'Payment details are available for review, but confirmation is not implemented yet.',
+      message: 'Review these verified details, then select Confirm Payment to continue.',
       color: _warning,
       icon: Icons.info_outline_rounded,
     ),
@@ -651,4 +1020,43 @@ String _formatDateTime(DateTime value) {
   final hour = local.hour.toString().padLeft(2, '0');
   final minute = local.minute.toString().padLeft(2, '0');
   return '$year-$month-$day $hour:$minute';
+}
+
+String _confirmationFailureMessage(CustomerPaymentConfirmationFailure failure) {
+  return switch (failure) {
+    CustomerPaymentConfirmationFailure.authentication =>
+      'Your VPay session could not be verified. Sign in again before retrying.',
+    CustomerPaymentConfirmationFailure.notFound =>
+      'This payment request was not found. No payment was completed.',
+    CustomerPaymentConfirmationFailure.expired =>
+      'This payment request has expired. Ask the merchant for a new QR code.',
+    CustomerPaymentConfirmationFailure.failed =>
+      'This payment request previously failed and cannot be retried.',
+    CustomerPaymentConfirmationFailure.alreadyPaid =>
+      'This QR payment has already been paid by another customer.',
+    CustomerPaymentConfirmationFailure.belowMinimum =>
+      'The payment amount is below VPay’s minimum QR payment amount.',
+    CustomerPaymentConfirmationFailure.limitExceeded =>
+      'This payment exceeds your allowed QR transaction limit.',
+    CustomerPaymentConfirmationFailure.insufficientBalance =>
+      'Your card does not have enough funds for this payment.',
+    CustomerPaymentConfirmationFailure.minimumBalanceRequired => 'This payment would reduce your card below the required Rs. 500 retained balance.',
+    CustomerPaymentConfirmationFailure.cardFrozen =>
+      'Your VPay card is frozen and cannot make this payment.',
+    CustomerPaymentConfirmationFailure.cardExpired =>
+      'Your VPay card has expired and cannot make this payment.',
+    CustomerPaymentConfirmationFailure.accountNotReady =>
+      'Your customer account is not ready to make payments.',
+    CustomerPaymentConfirmationFailure.merchantUnavailable =>
+      'The merchant cannot receive this payment right now.',
+    CustomerPaymentConfirmationFailure.balanceSchema =>
+      'Your payment balance requires support before QR payments can continue.',
+    CustomerPaymentConfirmationFailure.conflict =>
+      'VPay found an inconsistent payment state. No new payment was submitted.',
+    CustomerPaymentConfirmationFailure.unavailable =>
+      'QR payment execution is unavailable right now. Please try again later.',
+    CustomerPaymentConfirmationFailure.ambiguousNetwork => 'The payment result could not be determined. Check its status instead of confirming again.',
+    CustomerPaymentConfirmationFailure.invalidResponse =>
+      'VPay received an invalid payment response and cannot confirm success.',
+  };
 }

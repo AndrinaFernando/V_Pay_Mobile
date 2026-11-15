@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
+import '../../auth/auth_service.dart';
 import '../../auth/models/vpay_user_profile.dart';
 import '../../auth/models/user_profile_result.dart';
 import '../../auth/services/user_api_service.dart';
 import '../services/payment_intent_service.dart';
 import 'create_payment_request_screen.dart';
-import '../widgets/merchant_brand_logo.dart';
+import 'merchant_profile_screen.dart';
 
 const _canvas = Color(0xFFFCF9F8);
 const _surface = Colors.white;
@@ -20,12 +22,14 @@ class MerchantDashboardScreen extends StatefulWidget {
   const MerchantDashboardScreen({
     super.key,
     required this.profile,
+    this.authService,
     this.onCreatePaymentRequest,
     this.loadProfile,
     this.paymentIntentService,
   });
 
   final VPayUserProfile profile;
+  final AuthService? authService;
   final VoidCallback? onCreatePaymentRequest;
   final Future<UserProfileResult> Function()? loadProfile;
   final PaymentIntentService? paymentIntentService;
@@ -41,11 +45,18 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen> {
   bool _isRefreshingProfile = false;
   String? _profileRefreshError;
 
-  String get _businessName {
+  String get _headerBusinessName {
     final businessName = _profile.businessName?.trim();
     return businessName == null || businessName.isEmpty
-        ? _profile.name
+        ? 'Business name not provided'
         : businessName;
+  }
+
+  String get _businessCategory {
+    final category = _profile.businessCategory?.trim();
+    return category == null || category.isEmpty
+        ? 'Business category not provided'
+        : category;
   }
 
   String get _firstName {
@@ -73,7 +84,8 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen> {
         ),
       ),
     );
-    if (mounted) setState(() => _selectedNavigationIndex = 0);
+    if (!mounted) return;
+    setState(() => _selectedNavigationIndex = 0);
   }
 
   Future<void> _refreshProfile() async {
@@ -106,14 +118,21 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen> {
   }
 
   void _onNavigationSelected(int index) {
-    setState(() => _selectedNavigationIndex = index);
-    if (index == 0) return;
     if (index == 1) {
+      setState(() => _selectedNavigationIndex = index);
       _showCreateRequest();
       return;
     }
-    _showComingSoon(index == 2 ? 'Payment history' : 'Terminal tools');
+    if (index == 3) {
+      setState(() => _selectedNavigationIndex = index);
+      return;
+    }
+    if (index == 0) {
+      setState(() => _selectedNavigationIndex = 0);
+      return;
+    }
     setState(() => _selectedNavigationIndex = 0);
+    _showComingSoon('Payment history');
   }
 
   void _showComingSoon(String feature) {
@@ -122,28 +141,54 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen> {
     messenger.showSnackBar(SnackBar(content: Text('$feature is coming soon.')));
   }
 
+  Future<void> _openProfile() async {
+    final authService = widget.authService;
+    if (authService == null) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => MerchantProfileScreen(
+          profile: _profile,
+          authService: authService,
+          loadProfile: widget.loadProfile,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _canvas,
-      body: SafeArea(
-        bottom: false,
-        child: RefreshIndicator(
-          onRefresh: _refreshProfile,
-          child: SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            child: Center(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.dark.copyWith(statusBarColor: _canvas),
+      child: Scaffold(
+        backgroundColor: _canvas,
+        body: SafeArea(
+          bottom: false,
+          child: _selectedNavigationIndex == 3
+              ? _buildProfileTab()
+              : _buildDashboardTab(),
+        ),
+        bottomNavigationBar: _buildBottomNavigationBar(),
+      ),
+    );
+  }
+
+  Widget _buildDashboardTab() {
+    return RefreshIndicator(
+      onRefresh: _refreshProfile,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildBrandBar(),
+            Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 560),
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 32),
+                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _buildBrandBar(),
-                      const SizedBox(height: 24),
-                      _buildGreeting(),
-                      const SizedBox(height: 20),
                       const _MerchantBalanceCard(),
                       const SizedBox(height: 16),
                       _buildCreateRequestButton(),
@@ -166,78 +211,139 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen> {
                 ),
               ),
             ),
-          ),
+          ],
         ),
       ),
-      bottomNavigationBar: _buildBottomNavigationBar(),
+    );
+  }
+
+  Widget _buildProfileTab() {
+    final authService = widget.authService;
+    if (authService == null) {
+      return const Center(child: Text('Merchant profile is unavailable.'));
+    }
+
+    return MerchantProfileScreen(
+      profile: _profile,
+      authService: authService,
+      loadProfile: widget.loadProfile,
+      onBack: () => setState(() => _selectedNavigationIndex = 0),
     );
   }
 
   Widget _buildBrandBar() {
-    return Row(
-      children: [
-        const MerchantBrandLogo(height: 30),
-        const SizedBox(width: 12),
-        Expanded(
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 22),
+      decoration: const BoxDecoration(color: _navy),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                'VPay Merchant',
-                style: TextStyle(
-                  color: _ink,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.2,
+              Row(
+                children: [
+                  Image.asset(
+                    'assets/branding/logos/Long Logo Dark Mode.png',
+                    key: const Key('merchantDashboardLogo'),
+                    width: 112,
+                    height: 75,
+                    fit: BoxFit.contain,
+                    semanticLabel: 'VPay',
+                  ),
+                  const SizedBox(width: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 9,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF073A61),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Text(
+                      'BUSINESS',
+                      style: TextStyle(
+                        color: Color(0xFF58C7FF),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    key: const Key('merchantProfileAction'),
+                    tooltip: 'Profile',
+                    onPressed: _openProfile,
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.white.withValues(alpha: 0.10),
+                      foregroundColor: Colors.white,
+                    ),
+                    icon: const Icon(Icons.account_circle_outlined),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 11,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF102F50),
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.storefront_outlined,
+                      color: Color(0xFF4BC5FF),
+                      size: 15,
+                    ),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        '$_headerBusinessName  •  $_businessCategory',
+                        key: const Key('merchantDashboardBusinessDetails'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFFE1EFFB),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 2),
+              const SizedBox(height: 15),
+              const Text(
+                'Your business at a glance',
+                style: TextStyle(
+                  color: Color(0xFFB8CEE8),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 3),
               Text(
-                _businessName,
+                '$_greeting, $_firstName',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  color: _supporting,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
+                  color: Colors.white,
+                  fontSize: 23,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.4,
                 ),
               ),
             ],
           ),
         ),
-        IconButton(
-          tooltip: 'Notifications',
-          onPressed: () => _showComingSoon('Notifications'),
-          style: IconButton.styleFrom(
-            backgroundColor: _surface,
-            foregroundColor: _supporting,
-            side: const BorderSide(color: _divider),
-          ),
-          icon: const Icon(Icons.notifications_none_rounded),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildGreeting() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Your business at a glance',
-          style: TextStyle(color: _supporting, fontSize: 13),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          '$_greeting, $_firstName',
-          style: const TextStyle(
-            color: _ink,
-            fontSize: 24,
-            fontWeight: FontWeight.w700,
-            letterSpacing: -0.5,
-          ),
-        ),
-      ],
+      ),
     );
   }
 
@@ -351,8 +457,9 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen> {
               label: 'Payments',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.devices_outlined),
-              label: 'Terminal',
+              icon: Icon(Icons.person_outline_rounded),
+              activeIcon: Icon(Icons.person_rounded),
+              label: 'Profile',
             ),
           ],
         ),

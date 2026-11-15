@@ -70,4 +70,26 @@ void main() {
     expect(child, isA<MerchantDashboardScreen>());
     expect(find.byType(CustomerShell), findsNothing);
   });
+
+  testWidgets('passes the shared auth service to merchant dashboard', (
+    tester,
+  ) async {
+    final authService = _FakeAuthService();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VPayAccountGate(
+          authService: authService,
+          userApiService: _FakeUserApiService(
+            UserProfileResult.found(_profile('MERCHANT')),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final accessGate = tester.widget<AppAccessGate>(find.byType(AppAccessGate));
+    final dashboard = accessGate.child as MerchantDashboardScreen;
+    expect(dashboard.authService, same(authService));
+    expect(dashboard.loadProfile, isNotNull);
+  });
 }

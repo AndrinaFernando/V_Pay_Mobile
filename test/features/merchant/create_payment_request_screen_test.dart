@@ -73,6 +73,11 @@ class _FakePaymentIntentService implements PaymentIntentService {
     statusCalls++;
     return response!;
   }
+
+  @override
+  Future<List<MerchantPaymentIntent>> listPaymentIntents({
+    int limit = 20,
+  }) async => const [];
 }
 
 Future<void> _showForm(
@@ -360,6 +365,12 @@ void main() {
     await tester.pump();
 
     expect(find.text('Payment received'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('paymentCreatedAt')),
+      80,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.byKey(const Key('paymentCreatedAt')), findsOneWidget);
     expect(find.byKey(const Key('paymentIntentQrCode')), findsNothing);
     expect(service.statusCalls, 1);
   });

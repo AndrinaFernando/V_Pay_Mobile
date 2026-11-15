@@ -577,9 +577,24 @@ class _PaymentIntentQrScreenState extends State<PaymentIntentQrScreen> {
               fontFamily: 'monospace',
             ),
           ),
+          const SizedBox(height: 10),
+          Text(
+            'Created ${_formatDateTime(_currentIntent.createdAt)}',
+            key: const Key('paymentCreatedAt'),
+            style: const TextStyle(color: _secondary, fontSize: 12),
+          ),
         ],
       ),
     );
+  }
+
+  String _formatDateTime(DateTime value) {
+    final local = value.toLocal();
+    final day = local.day.toString().padLeft(2, '0');
+    final month = local.month.toString().padLeft(2, '0');
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+    return '$day/$month/${local.year} $hour:$minute';
   }
 
   Widget _buildRefreshError() {

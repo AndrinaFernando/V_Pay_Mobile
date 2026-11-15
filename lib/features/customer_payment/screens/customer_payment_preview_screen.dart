@@ -24,12 +24,14 @@ class CustomerPaymentPreviewScreen extends StatefulWidget {
     this.previewService,
     this.confirmationService,
     this.localAuthService,
+    this.onPaymentSuccess,
   });
 
   final String paymentReference;
   final CustomerPaymentPreviewService? previewService;
   final CustomerPaymentConfirmationService? confirmationService;
   final LocalAuthService? localAuthService;
+  final ValueChanged<CustomerPaymentResult>? onPaymentSuccess;
 
   @override
   State<CustomerPaymentPreviewScreen> createState() =>
@@ -49,6 +51,7 @@ class _CustomerPaymentPreviewScreenState
   bool _isConfirming = false;
   bool _isCheckingStatus = false;
   bool _isPaymentResultUnknown = false;
+  bool _didNotifyPaymentSuccess = false;
   String? _unknownResultMessage;
   int _requestGeneration = 0;
 
@@ -104,10 +107,7 @@ class _CustomerPaymentPreviewScreenState
         await _checkPaymentStatus(afterInconsistentReceipt: true);
         return;
       }
-      setState(() {
-        _paymentResult = result;
-        _isConfirming = false;
-      });
+      _acceptVerifiedPaymentResult(result);
     } on CustomerPaymentConfirmationException catch (error) {
       if (!mounted) return;
       if (error.failure ==
@@ -160,6 +160,10 @@ class _CustomerPaymentPreviewScreenState
         });
         return;
       }
+      if (result.status == CustomerPaymentStatus.success) {
+        _acceptVerifiedPaymentResult(result);
+        return;
+      }
       setState(() {
         _paymentResult = result;
         _isConfirming = false;
@@ -177,6 +181,21 @@ class _CustomerPaymentPreviewScreenState
         _confirmationMessage = null;
       });
     }
+  }
+
+  void _acceptVerifiedPaymentResult(CustomerPaymentResult result) {
+    setState(() {
+      _paymentResult = result;
+      _isConfirming = false;
+      _isCheckingStatus = false;
+      _isPaymentResultUnknown = false;
+      _unknownResultMessage = null;
+      _confirmationMessage = null;
+    });
+
+    if (_didNotifyPaymentSuccess) return;
+    _didNotifyPaymentSuccess = true;
+    widget.onPaymentSuccess?.call(result);
   }
 
   CustomerPaymentConfirmationService get _paymentConfirmationService {

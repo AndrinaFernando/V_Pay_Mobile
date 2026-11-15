@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/security/local_auth_service.dart';
 import '../../auth/auth_service.dart';
 import '../../auth/models/vpay_user_profile.dart';
+import '../../card/services/card_api_service.dart';
+import '../../customer_payment/models/customer_payment_result.dart';
 import '../../customer_payment/screens/customer_payment_preview_screen.dart';
 import '../../customer_payment/screens/customer_qr_scanner_screen.dart';
+import '../../customer_payment/services/customer_payment_confirmation_service.dart';
 import '../../customer_payment/services/customer_payment_preview_service.dart';
 import 'customer_home_screen.dart';
 
@@ -18,29 +22,30 @@ class CustomerShell extends StatefulWidget {
     required this.authService,
     this.qrScannerBuilder,
     this.paymentPreviewService,
+    this.paymentConfirmationService,
+    this.localAuthService,
+    this.cardApiService,
   });
 
   final VPayUserProfile profile;
   final AuthService authService;
   final CustomerQrScannerViewBuilder? qrScannerBuilder;
   final CustomerPaymentPreviewService? paymentPreviewService;
+  final CustomerPaymentConfirmationService? paymentConfirmationService;
+  final LocalAuthService? localAuthService;
+  final CardApiService? cardApiService;
 
   @override
   State<CustomerShell> createState() => _CustomerShellState();
 }
 
 class _CustomerShellState extends State<CustomerShell> {
-  late final Widget _home;
   int _selectedIndex = 0;
+  int _balanceRefreshTrigger = 0;
   bool _isSigningOut = false;
 
-  @override
-  void initState() {
-    super.initState();
-    _home = CustomerHomeScreen(
-      profile: widget.profile,
-      onScanAndPay: _openQrScanner,
-    );
+  void _handlePaymentSuccess(CustomerPaymentResult _) {
+    setState(() => _balanceRefreshTrigger++);
   }
 
   Future<void> _signOut() async {
@@ -78,6 +83,9 @@ class _CustomerShellState extends State<CustomerShell> {
         builder: (context) => CustomerPaymentPreviewScreen(
           paymentReference: paymentReference,
           previewService: widget.paymentPreviewService,
+          confirmationService: widget.paymentConfirmationService,
+          localAuthService: widget.localAuthService,
+          onPaymentSuccess: _handlePaymentSuccess,
         ),
       ),
     );
@@ -92,7 +100,12 @@ class _CustomerShellState extends State<CustomerShell> {
         child: IndexedStack(
           index: _selectedIndex,
           children: [
-            _home,
+            CustomerHomeScreen(
+              profile: widget.profile,
+              cardApiService: widget.cardApiService,
+              onScanAndPay: _openQrScanner,
+              balanceRefreshTrigger: _balanceRefreshTrigger,
+            ),
             _ScanAndPayTab(onScan: _openQrScanner),
             const _ComingSoonTab(
               icon: Icons.receipt_long_outlined,

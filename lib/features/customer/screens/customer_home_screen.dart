@@ -25,11 +25,13 @@ class CustomerHomeScreen extends StatefulWidget {
     required this.profile,
     this.cardApiService,
     this.onScanAndPay,
+    this.balanceRefreshTrigger = 0,
   });
 
   final VPayUserProfile profile;
   final CardApiService? cardApiService;
   final VoidCallback? onScanAndPay;
+  final int balanceRefreshTrigger;
 
   @override
   State<CustomerHomeScreen> createState() => _CustomerHomeScreenState();
@@ -44,6 +46,14 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
     super.initState();
     _cardApiService = widget.cardApiService ?? CardApiService();
     _cardFuture = _cardApiService.getCurrentUserCard();
+  }
+
+  @override
+  void didUpdateWidget(covariant CustomerHomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.balanceRefreshTrigger != oldWidget.balanceRefreshTrigger) {
+      _cardFuture = _cardApiService.getCurrentUserCard();
+    }
   }
 
   void _retry() {

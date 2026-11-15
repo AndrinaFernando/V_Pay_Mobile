@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/security/local_auth_service.dart';
+import '../../card/services/card_api_service.dart';
+import '../models/customer_payment_balance_check.dart';
 import '../models/customer_payment_preview.dart';
 import '../models/customer_payment_result.dart';
 import '../services/customer_payment_confirmation_service.dart';
@@ -24,6 +26,7 @@ class CustomerPaymentPreviewScreen extends StatefulWidget {
     this.previewService,
     this.confirmationService,
     this.localAuthService,
+    this.cardApiService,
     this.onPaymentSuccess,
   });
 
@@ -31,6 +34,7 @@ class CustomerPaymentPreviewScreen extends StatefulWidget {
   final CustomerPaymentPreviewService? previewService;
   final CustomerPaymentConfirmationService? confirmationService;
   final LocalAuthService? localAuthService;
+  final CardApiService? cardApiService;
   final ValueChanged<CustomerPaymentResult>? onPaymentSuccess;
 
   @override
@@ -43,10 +47,12 @@ class _CustomerPaymentPreviewScreenState
   late final CustomerPaymentPreviewService _previewService;
   CustomerPaymentConfirmationService? _confirmationService;
   late final LocalAuthService _localAuthService;
+  late final CardApiService _cardApiService;
   CustomerPaymentPreview? _preview;
   CustomerPaymentPreviewFailure? _failure;
   CustomerPaymentResult? _paymentResult;
   String? _confirmationMessage;
+  String? _balanceErrorMessage;
   bool _isLoading = true;
   bool _isConfirming = false;
   bool _isCheckingStatus = false;
@@ -54,6 +60,8 @@ class _CustomerPaymentPreviewScreenState
   bool _didNotifyPaymentSuccess = false;
   String? _unknownResultMessage;
   int _requestGeneration = 0;
+  String? _lastBalanceNotification;
+  DateTime? _lastBalanceNotificationAt;
 
   @override
   void initState() {
@@ -62,6 +70,7 @@ class _CustomerPaymentPreviewScreenState
         widget.previewService ?? ApiCustomerPaymentPreviewService();
     _confirmationService = widget.confirmationService;
     _localAuthService = widget.localAuthService ?? LocalAuthService();
+    _cardApiService = widget.cardApiService ?? CardApiService();
     _loadPreview();
   }
 
@@ -78,6 +87,19 @@ class _CustomerPaymentPreviewScreenState
       _isConfirming = true;
       _confirmationMessage = null;
     });
+
+    final balanceCheck = await _readBalanceCheck(preview);
+    if (!mounted) return;
+    if (balanceCheck == null || !balanceCheck.isAllowed) {
+      final message = _balanceMessage(balanceCheck);
+      setState(() {
+        _isConfirming = false;
+        _balanceErrorMessage = message;
+      });
+      _showBalanceError(message);
+      return;
+    }
+    setState(() => _balanceErrorMessage = null);
 
     var authenticated = false;
     try {
@@ -114,6 +136,22 @@ class _CustomerPaymentPreviewScreenState
               CustomerPaymentConfirmationFailure.ambiguousNetwork ||
           error.failure == CustomerPaymentConfirmationFailure.invalidResponse) {
         await _checkPaymentStatus(afterAmbiguousConfirmation: true);
+        return;
+      }
+      if (error.failure ==
+              CustomerPaymentConfirmationFailure.minimumBalanceRequired ||
+          error.failure ==
+              CustomerPaymentConfirmationFailure.insufficientBalance) {
+        final latestCheck = await _readBalanceCheck(preview);
+        if (!mounted) return;
+        final message = latestCheck?.isAllowed == true
+            ? 'VPay rejected this payment because the required Rs. 500 retained balance could not be preserved. Your latest calculated maximum is ${formatLkrMinor(latestCheck!.maximumPermissibleAmountMinor ?? 0)}.'
+            : _balanceMessage(latestCheck);
+        setState(() {
+          _isConfirming = false;
+          _balanceErrorMessage = message;
+        });
+        _showBalanceError(message);
         return;
       }
       setState(() {
@@ -195,11 +233,88 @@ class _CustomerPaymentPreviewScreenState
 
     if (_didNotifyPaymentSuccess) return;
     _didNotifyPaymentSuccess = true;
-    widget.onPaymentSuccess?.call(result);
+    try {
+      widget.onPaymentSuccess?.call(result);
+    } catch (_) {
+      // A parent refresh failure must not replace a verified payment receipt.
+    }
   }
 
   CustomerPaymentConfirmationService get _paymentConfirmationService {
     return _confirmationService ??= ApiCustomerPaymentConfirmationService();
+  }
+
+  Future<CustomerPaymentBalanceCheck?> _readBalanceCheck(
+    CustomerPaymentPreview preview,
+  ) async {
+    try {
+      final card = await _cardApiService.getCurrentUserCard();
+      return checkCustomerPaymentBalance(
+        balance: card.balance,
+        amountMinor: preview.amountMinor,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String _balanceMessage(CustomerPaymentBalanceCheck? check) {
+    if (check == null ||
+        check.outcome == CustomerPaymentBalanceOutcome.invalidBalance) {
+      return 'VPay could not verify your current card balance. Try again before authenticating.';
+    }
+    if (check.outcome == CustomerPaymentBalanceOutcome.invalidAmount) {
+      return 'This payment has an invalid amount and cannot be submitted.';
+    }
+
+    final maximum = formatLkrMinor(check.maximumPermissibleAmountMinor ?? 0);
+    if (check.outcome == CustomerPaymentBalanceOutcome.insufficientBalance) {
+      return 'Your card does not have enough available balance for this payment. You can currently pay at most $maximum while keeping the required Rs. 500.00 retained balance.';
+    }
+    if (check.outcome ==
+        CustomerPaymentBalanceOutcome.minimumRetainedBalanceRequired) {
+      return 'This payment would reduce your card below the required Rs. 500.00 retained balance. You can currently pay at most $maximum.';
+    }
+    return '';
+  }
+
+  void _showBalanceError(String message) {
+    if (message.isEmpty) return;
+    final now = DateTime.now();
+    final lastAt = _lastBalanceNotificationAt;
+    if (_lastBalanceNotification == message &&
+        lastAt != null &&
+        now.difference(lastAt) < const Duration(seconds: 3)) {
+      return;
+    }
+    _lastBalanceNotification = message;
+    _lastBalanceNotificationAt = now;
+
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        key: const ValueKey('paymentBalanceErrorSnackBar'),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: _error,
+        content: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.error_outline_rounded, color: Colors.white),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _loadPreview() async {
@@ -212,8 +327,13 @@ class _CustomerPaymentPreviewScreenState
     try {
       final preview = await _previewService.getPreview(widget.paymentReference);
       if (!mounted || requestGeneration != _requestGeneration) return;
+      final balanceCheck = await _readBalanceCheck(preview);
+      if (!mounted || requestGeneration != _requestGeneration) return;
       setState(() {
         _preview = preview;
+        _balanceErrorMessage = balanceCheck?.isAllowed == true
+            ? null
+            : _balanceMessage(balanceCheck);
         _isLoading = false;
       });
     } on CustomerPaymentPreviewException catch (error) {
@@ -309,6 +429,7 @@ class _CustomerPaymentPreviewScreenState
       isConfirming: _isConfirming,
       isCheckingStatus: _isCheckingStatus,
       confirmationMessage: _confirmationMessage,
+      balanceErrorMessage: _balanceErrorMessage,
       onConfirm: _confirmPayment,
     );
   }
@@ -444,6 +565,7 @@ class _PreviewDetails extends StatelessWidget {
     required this.isConfirming,
     required this.isCheckingStatus,
     required this.confirmationMessage,
+    required this.balanceErrorMessage,
     required this.onConfirm,
   });
 
@@ -452,6 +574,7 @@ class _PreviewDetails extends StatelessWidget {
   final bool isConfirming;
   final bool isCheckingStatus;
   final String? confirmationMessage;
+  final String? balanceErrorMessage;
   final VoidCallback onConfirm;
 
   @override
@@ -563,6 +686,43 @@ class _PreviewDetails extends StatelessWidget {
                   ],
                 ),
               ),
+              if (balanceErrorMessage != null) ...[
+                const SizedBox(height: 16),
+                Container(
+                  key: const ValueKey('paymentBalanceError'),
+                  padding: const EdgeInsets.all(15),
+                  decoration: BoxDecoration(
+                    color: _error.withValues(alpha: 0.09),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: _error.withValues(alpha: 0.45),
+                      width: 1.4,
+                    ),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(
+                        Icons.error_outline_rounded,
+                        color: _error,
+                        size: 23,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          balanceErrorMessage!,
+                          style: const TextStyle(
+                            color: Color(0xFFB91C1C),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               if (confirmationMessage != null) ...[
                 const SizedBox(height: 16),
                 Container(

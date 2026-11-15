@@ -3,6 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vpay_mobile/core/security/local_auth_service.dart';
+import 'package:vpay_mobile/features/card/models/vpay_card.dart';
+import 'package:vpay_mobile/features/card/services/card_api_service.dart';
+import 'package:vpay_mobile/features/customer_payment/models/customer_payment_balance_check.dart';
 import 'package:vpay_mobile/features/customer_payment/models/customer_payment_preview.dart';
 import 'package:vpay_mobile/features/customer_payment/models/customer_payment_result.dart';
 import 'package:vpay_mobile/features/customer_payment/screens/customer_payment_preview_screen.dart';
@@ -43,6 +46,30 @@ class _FakeLocalAuthService implements LocalAuthService {
 
 typedef _PaymentResponse = Future<CustomerPaymentResult> Function();
 
+class _FakeCardApiService extends CardApiService {
+  _FakeCardApiService({List<num> balances = const [20000]})
+    : _balances = List.of(balances);
+
+  final List<num> _balances;
+  int requests = 0;
+
+  @override
+  Future<VPayCard> getCurrentUserCard() async {
+    requests++;
+    final balance = _balances.length > 1
+        ? _balances.removeAt(0)
+        : _balances.single;
+    return VPayCard(
+      id: 'customer-uid',
+      maskedNumber: '•••• 4827',
+      balance: balance,
+      status: 'ACTIVE',
+      expiresAt: DateTime.utc(2099),
+      createdAt: DateTime.utc(2026),
+    );
+  }
+}
+
 class _FakeConfirmationService implements CustomerPaymentConfirmationService {
   _FakeConfirmationService({
     required List<_PaymentResponse> confirmations,
@@ -72,11 +99,12 @@ CustomerPaymentPreview _preview({
   CustomerPaymentStatus status = CustomerPaymentStatus.pending,
   DateTime? expiresAt,
   String? description = 'Lunch order',
+  int amountMinor = 1285050,
 }) {
   return CustomerPaymentPreview(
     paymentReference: 'payment-ref-123',
     merchantName: 'Colombo Cafe',
-    amountMinor: 1285050,
+    amountMinor: amountMinor,
     currency: 'LKR',
     status: status,
     createdAt: DateTime.utc(2099, 2, 3, 8),
@@ -113,6 +141,7 @@ Future<void> _pumpPreview(
   CustomerPaymentPreviewService service, {
   CustomerPaymentConfirmationService? confirmationService,
   LocalAuthService? localAuthService,
+  CardApiService? cardApiService,
   ValueChanged<CustomerPaymentResult>? onPaymentSuccess,
 }) async {
   await tester.pumpWidget(
@@ -122,6 +151,7 @@ Future<void> _pumpPreview(
         previewService: service,
         confirmationService: confirmationService,
         localAuthService: localAuthService,
+        cardApiService: cardApiService ?? _FakeCardApiService(),
         onPaymentSuccess: onPaymentSuccess,
       ),
     ),
@@ -141,6 +171,37 @@ void main() {
     expect(formatLkrMinor(105), 'Rs. 1.05');
     expect(formatLkrMinor(1285050), 'Rs. 12,850.50');
   });
+
+  test(
+    'retained balance check allows exact equality and rejects invalid data',
+    () {
+      expect(
+        checkCustomerPaymentBalance(
+          balance: 1500,
+          amountMinor: 100000,
+        ).isAllowed,
+        isTrue,
+      );
+      expect(
+        checkCustomerPaymentBalance(
+          balance: 1499.99,
+          amountMinor: 100000,
+        ).outcome,
+        CustomerPaymentBalanceOutcome.minimumRetainedBalanceRequired,
+      );
+      expect(
+        checkCustomerPaymentBalance(balance: 100, amountMinor: 0).outcome,
+        CustomerPaymentBalanceOutcome.invalidAmount,
+      );
+      expect(
+        checkCustomerPaymentBalance(
+          balance: double.nan,
+          amountMinor: 1000,
+        ).outcome,
+        CustomerPaymentBalanceOutcome.invalidBalance,
+      );
+    },
+  );
 
   test('rejects incomplete or unsupported preview data', () {
     final validJson = <String, dynamic>{
@@ -317,6 +378,102 @@ void main() {
     expect(find.text('Payment successful'), findsOneWidget);
   });
 
+  testWidgets('shows a red retained-balance error and blocks authentication', (
+    tester,
+  ) async {
+    final auth = _FakeLocalAuthService((_) async => true);
+    final confirmation = _FakeConfirmationService(
+      confirmations: [() async => _paymentResult(amountMinor: 1000)],
+    );
+    final card = _FakeCardApiService(balances: const [509]);
+
+    await _pumpPreview(
+      tester,
+      _FakePreviewService([() async => _preview(amountMinor: 1000)]),
+      confirmationService: confirmation,
+      localAuthService: auth,
+      cardApiService: card,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('paymentBalanceError')), findsOneWidget);
+    expect(find.textContaining('Rs. 9.00'), findsOneWidget);
+
+    await _tapConfirm(tester);
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('paymentBalanceErrorSnackBar')),
+      findsOneWidget,
+    );
+    expect(auth.reasons, isEmpty);
+    expect(confirmation.confirmationReferences, isEmpty);
+
+    ScaffoldMessenger.of(
+      tester.element(find.byKey(const ValueKey('confirmPaymentButton'))),
+    ).hideCurrentSnackBar();
+    await tester.pumpAndSettle();
+    await _tapConfirm(tester);
+    await tester.pump();
+    await tester.pump();
+    expect(
+      find.byKey(const ValueKey('paymentBalanceErrorSnackBar')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('allows a payment that leaves exactly Rs. 500', (tester) async {
+    final auth = _FakeLocalAuthService((_) async => true);
+    final confirmation = _FakeConfirmationService(
+      confirmations: [() async => _paymentResult(amountMinor: 1000)],
+    );
+
+    await _pumpPreview(
+      tester,
+      _FakePreviewService([() async => _preview(amountMinor: 1000)]),
+      confirmationService: confirmation,
+      localAuthService: auth,
+      cardApiService: _FakeCardApiService(balances: const [510]),
+    );
+    await tester.pumpAndSettle();
+    await _tapConfirm(tester);
+    await tester.pumpAndSettle();
+
+    expect(auth.reasons, hasLength(1));
+    expect(confirmation.confirmationReferences, ['payment-ref-123']);
+    expect(find.text('Payment successful'), findsOneWidget);
+  });
+
+  testWidgets('rechecks a changed balance before device authentication', (
+    tester,
+  ) async {
+    final auth = _FakeLocalAuthService((_) async => true);
+    final confirmation = _FakeConfirmationService(
+      confirmations: [() async => _paymentResult(amountMinor: 1000)],
+    );
+    final card = _FakeCardApiService(balances: const [1000, 505]);
+
+    await _pumpPreview(
+      tester,
+      _FakePreviewService([() async => _preview(amountMinor: 1000)]),
+      confirmationService: confirmation,
+      localAuthService: auth,
+      cardApiService: card,
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('paymentBalanceError')), findsNothing);
+
+    await _tapConfirm(tester);
+    await tester.pump();
+    await tester.pump();
+
+    expect(card.requests, 2);
+    expect(find.textContaining('Rs. 5.00'), findsWidgets);
+    expect(auth.reasons, isEmpty);
+    expect(confirmation.confirmationReferences, isEmpty);
+  });
+
   testWidgets('shows a clear known backend rejection', (tester) async {
     final successfulResults = <CustomerPaymentResult>[];
     final confirmation = _FakeConfirmationService(
@@ -342,7 +499,7 @@ void main() {
 
     expect(
       find.textContaining('required Rs. 500 retained balance'),
-      findsOneWidget,
+      findsWidgets,
     );
     expect(successfulResults, isEmpty);
     expect(find.text('Payment successful'), findsNothing);

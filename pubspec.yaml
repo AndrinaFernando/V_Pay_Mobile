@@ -40,6 +40,9 @@ dependencies:
   local_auth: ^3.0.2
   lottie: ^3.6.1
   mobile_scanner: ^7.5.0
+  qr_flutter: 4.1.0
+  url_launcher: ^6.3.2
+  webview_flutter: ^4.14.1
 
 dev_dependencies:
   flutter_test:
@@ -74,6 +77,9 @@ flutter:
   assets:
     - assets/animations/error_404.json
     - assets/branding/vpay_logo.png
+    - assets/branding/logos/Logo Blue V2.0.png
+    - assets/branding/logos/Long Logo Light Mode.png
+    - assets/branding/logos/Long Logo Dark Mode.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:

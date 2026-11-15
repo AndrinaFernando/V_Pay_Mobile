@@ -8,6 +8,7 @@ import '../../../core/network/api_exception.dart';
 import '../../auth/models/vpay_user_profile.dart';
 import '../../card/models/vpay_card.dart';
 import '../../card/services/card_api_service.dart';
+import '../../topup/screens/topup_screen.dart';
 import '../models/customer_transaction.dart';
 import '../widgets/customer_transaction_tile.dart';
 
@@ -83,6 +84,16 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
     messenger.showSnackBar(SnackBar(content: Text('$feature is coming soon.')));
   }
 
+  Future<void> _openTopUp() async {
+    final result = await Navigator.of(context)
+        .push(MaterialPageRoute<String>(builder: (_) => const TopUpScreen()));
+    if (!mounted) return;
+    _retry();
+    if (result != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(result)));
+    }
+  }
 
   String get _firstName {
     final name = widget.profile.name.trim();
@@ -204,7 +215,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
           child: SizedBox(
             height: 52,
             child: FilledButton.icon(
-              onPressed: () => _showComingSoon('Top Up'),
+              onPressed: _openTopUp,
               style: FilledButton.styleFrom(
                 backgroundColor: _electric,
                 foregroundColor: Colors.white,

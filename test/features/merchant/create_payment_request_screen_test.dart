@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:vpay_mobile/core/network/api_exception.dart';
+import 'package:vpay_mobile/features/merchant/models/payment_amount_limits.dart';
 import 'package:vpay_mobile/features/merchant/models/merchant_payment_intent.dart';
 import 'package:vpay_mobile/features/merchant/screens/create_payment_request_screen.dart';
 import 'package:vpay_mobile/features/merchant/screens/payment_intent_qr_screen.dart';
@@ -73,6 +74,11 @@ class _FakePaymentIntentService implements PaymentIntentService {
     statusCalls++;
     return response!;
   }
+
+  @override
+  Future<List<MerchantPaymentIntent>> listPaymentIntents({
+    int limit = 20,
+  }) async => const [];
 }
 
 Future<void> _showForm(
@@ -117,6 +123,15 @@ void main() {
     expect(parseLkrAmountToMinorUnits('1,000'), isNull);
   });
 
+  test('default merchant amount policy covers LKR 10 through LKR 100,000', () {
+    const limits = PaymentAmountLimits.lkrDefault;
+    expect(limits.accepts(parseLkrAmountToMinorUnits('10.00')!), isTrue);
+    expect(limits.accepts(parseLkrAmountToMinorUnits('100000.00')!), isTrue);
+    expect(limits.accepts(parseLkrAmountToMinorUnits('9.99')!), isFalse);
+    expect(limits.accepts(parseLkrAmountToMinorUnits('100000.01')!), isFalse);
+    expect(limits.displayRange, 'LKR 10.00–LKR 100,000.00');
+  });
+
   testWidgets('valid request posts minor units and navigates to its QR', (
     tester,
   ) async {
@@ -152,31 +167,59 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('rejects zero and more than two decimal places before API call', (
-    tester,
-  ) async {
-    final service = _FakePaymentIntentService(intent: _intent());
-    await _showForm(tester, service);
+  testWidgets(
+    'rejects out-of-range and over-precision amounts before API call',
+    (tester) async {
+      final service = _FakePaymentIntentService(intent: _intent());
+      await _showForm(tester, service);
 
-    await tester.enterText(find.byKey(const Key('paymentAmountField')), '0');
-    await _tapSubmit(tester);
-    await tester.pump();
-    expect(find.text('Amount must be greater than LKR 0.00.'), findsOneWidget);
-    expect(service.calls, 0);
+      await tester.enterText(
+        find.byKey(const Key('paymentAmountField')),
+        '9.99',
+      );
+      await _tapSubmit(tester);
+      await tester.pump();
+      expect(
+        find.text('Enter an amount within LKR 10.00–LKR 100,000.00.'),
+        findsOneWidget,
+      );
+      expect(service.calls, 0);
 
-    await tester.enterText(
-      find.byKey(const Key('paymentAmountField')),
-      '1.234',
-    );
-    await _tapSubmit(tester);
-    await tester.pump();
-    expect(
-      find.text('Enter a valid amount with up to two decimal places.'),
-      findsOneWidget,
-    );
-    expect(service.calls, 0);
-    expect(find.byType(PaymentIntentQrScreen), findsNothing);
-  });
+      await tester.enterText(find.byKey(const Key('paymentAmountField')), '0');
+      await _tapSubmit(tester);
+      await tester.pump();
+      expect(
+        find.text('Enter an amount within LKR 10.00–LKR 100,000.00.'),
+        findsOneWidget,
+      );
+      expect(service.calls, 0);
+
+      await tester.enterText(
+        find.byKey(const Key('paymentAmountField')),
+        '100000.01',
+      );
+      await _tapSubmit(tester);
+      await tester.pump();
+      expect(
+        find.text('Enter an amount within LKR 10.00–LKR 100,000.00.'),
+        findsOneWidget,
+      );
+      expect(service.calls, 0);
+
+      await tester.enterText(
+        find.byKey(const Key('paymentAmountField')),
+        '10.001',
+      );
+      await _tapSubmit(tester);
+      await tester.pump();
+      expect(
+        find.text('Enter a valid amount with up to two decimal places.'),
+        findsOneWidget,
+      );
+      expect(service.calls, 0);
+      expect(find.byType(PaymentIntentQrScreen), findsNothing);
+    },
+  );
 
   testWidgets('rejects negative amounts before calling the API', (
     tester,
@@ -191,7 +234,10 @@ void main() {
     await _tapSubmit(tester);
     await tester.pump();
 
-    expect(find.text('Amount must be greater than LKR 0.00.'), findsOneWidget);
+    expect(
+      find.text('Enter an amount within LKR 10.00–LKR 100,000.00.'),
+      findsOneWidget,
+    );
     expect(service.calls, 0);
     expect(find.byType(PaymentIntentQrScreen), findsNothing);
   });
@@ -202,7 +248,10 @@ void main() {
     final pending = Completer<MerchantPaymentIntent>();
     final service = _FakePaymentIntentService(pending: pending);
     await _showForm(tester, service);
-    await tester.enterText(find.byKey(const Key('paymentAmountField')), '5.00');
+    await tester.enterText(
+      find.byKey(const Key('paymentAmountField')),
+      '10.00',
+    );
     await _tapSubmit(tester);
     await tester.pump();
 
@@ -216,7 +265,7 @@ void main() {
     );
     expect(button.onPressed, isNull);
 
-    pending.complete(_intent(amountMinor: 500));
+    pending.complete(_intent(amountMinor: 1000));
     await tester.pumpAndSettle();
     expect(find.byType(PaymentIntentQrScreen), findsOneWidget);
   });
@@ -226,7 +275,10 @@ void main() {
       error: const ApiException(400, 'Amount must be greater than zero'),
     );
     await _showForm(tester, service);
-    await tester.enterText(find.byKey(const Key('paymentAmountField')), '5.00');
+    await tester.enterText(
+      find.byKey(const Key('paymentAmountField')),
+      '10.00',
+    );
     await _tapSubmit(tester);
     await tester.pumpAndSettle();
     await _scrollToError(tester);
@@ -239,10 +291,13 @@ void main() {
     tester,
   ) async {
     final service = _FakePaymentIntentService(
-      intent: _intent(amountMinor: 500, status: 'COMPLETED'),
+      intent: _intent(amountMinor: 1000, status: 'COMPLETED'),
     );
     await _showForm(tester, service);
-    await tester.enterText(find.byKey(const Key('paymentAmountField')), '5.00');
+    await tester.enterText(
+      find.byKey(const Key('paymentAmountField')),
+      '10.00',
+    );
     await _tapSubmit(tester);
     await tester.pumpAndSettle();
     await _scrollToError(tester);
@@ -360,6 +415,12 @@ void main() {
     await tester.pump();
 
     expect(find.text('Payment received'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('paymentCreatedAt')),
+      80,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.byKey(const Key('paymentCreatedAt')), findsOneWidget);
     expect(find.byKey(const Key('paymentIntentQrCode')), findsNothing);
     expect(service.statusCalls, 1);
   });

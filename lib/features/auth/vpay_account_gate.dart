@@ -72,7 +72,11 @@ class _VPayAccountGateState extends State<VPayAccountGate> {
                 profile: profile,
                 authService: widget.authService,
               ),
-              'MERCHANT' => MerchantDashboardScreen(profile: profile),
+              'MERCHANT' => MerchantDashboardScreen(
+                profile: profile,
+                authService: widget.authService,
+                loadProfile: _userApiService.getCurrentUserProfile,
+              ),
               _ => AuthenticatedPlaceholderScreen(
                 authService: widget.authService,
               ),

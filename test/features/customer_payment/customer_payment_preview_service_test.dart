@@ -143,7 +143,7 @@ void main() {
   });
 
   test(
-    'maps authentication, unknown-reference and invalid responses',
+    'distinguishes authentication from account eligibility responses',
     () async {
       Future<CustomerPaymentPreviewException> errorFor(
         http.Response response,
@@ -163,13 +163,54 @@ void main() {
         CustomerPaymentPreviewFailure.authentication,
       );
       expect(
-        (await errorFor(http.Response('{}', 404))).failure,
-        CustomerPaymentPreviewFailure.unknownReference,
+        (await errorFor(
+          http.Response(
+            jsonEncode({
+              'success': false,
+              'message': 'Email verification is required',
+            }),
+            403,
+          ),
+        )).failure,
+        CustomerPaymentPreviewFailure.accountNotReady,
       );
       expect(
-        (await errorFor(http.Response('{"success":true}', 200))).failure,
-        CustomerPaymentPreviewFailure.invalidResponse,
+        (await errorFor(
+          http.Response(
+            jsonEncode({
+              'success': false,
+              'message':
+                  'Only active customer accounts can preview payment intents',
+            }),
+            403,
+          ),
+        )).failure,
+        CustomerPaymentPreviewFailure.accountNotReady,
       );
     },
   );
+
+  test('maps unknown-reference and invalid responses', () async {
+    Future<CustomerPaymentPreviewException> errorFor(
+      http.Response response,
+    ) async {
+      final apiClient = _FakeApiClient((_) async => response);
+      final service = ApiCustomerPaymentPreviewService(apiClient: apiClient);
+      try {
+        await service.getPreview('payment-ref');
+        fail('Expected preview lookup to fail');
+      } on CustomerPaymentPreviewException catch (error) {
+        return error;
+      }
+    }
+
+    expect(
+      (await errorFor(http.Response('{}', 404))).failure,
+      CustomerPaymentPreviewFailure.unknownReference,
+    );
+    expect(
+      (await errorFor(http.Response('{"success":true}', 200))).failure,
+      CustomerPaymentPreviewFailure.invalidResponse,
+    );
+  });
 }

@@ -1004,6 +1004,12 @@ _ErrorCopy _errorCopy(CustomerPaymentPreviewFailure failure) {
       icon: Icons.lock_outline_rounded,
       color: _error,
     ),
+    CustomerPaymentPreviewFailure.accountNotReady => const _ErrorCopy(
+      title: 'QR payments unavailable',
+      message: 'Your account cannot currently access QR payment previews. Make sure your email is verified and your Customer account is active, then try again.',
+      icon: Icons.person_off_outlined,
+      color: _warning,
+    ),
     CustomerPaymentPreviewFailure.network => const _ErrorCopy(
       title: 'No network connection',
       message: 'Check your internet connection, then retry this read-only payment lookup.',

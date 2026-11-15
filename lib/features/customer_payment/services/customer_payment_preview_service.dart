@@ -12,6 +12,7 @@ enum CustomerPaymentPreviewFailure {
   expired,
   alreadyUsed,
   authentication,
+  accountNotReady,
   network,
   timeout,
   invalidResponse,
@@ -102,8 +103,11 @@ class ApiCustomerPaymentPreviewService
   CustomerPaymentPreviewFailure _failureForResponse(int status, String body) {
     final message = _responseMessage(body).toLowerCase();
 
-    if (status == 401 || status == 403) {
+    if (status == 401) {
       return CustomerPaymentPreviewFailure.authentication;
+    }
+    if (status == 403) {
+      return CustomerPaymentPreviewFailure.accountNotReady;
     }
     if (status == 404) return CustomerPaymentPreviewFailure.unknownReference;
     if (status == 408 || status == 504) {

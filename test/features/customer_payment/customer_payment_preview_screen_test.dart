@@ -576,6 +576,7 @@ void main() {
     CustomerPaymentPreviewFailure.expired: 'Payment expired',
     CustomerPaymentPreviewFailure.alreadyUsed: 'Payment already used',
     CustomerPaymentPreviewFailure.authentication: 'Session verification failed',
+    CustomerPaymentPreviewFailure.accountNotReady: 'QR payments unavailable',
     CustomerPaymentPreviewFailure.network: 'No network connection',
     CustomerPaymentPreviewFailure.timeout: 'Request timed out',
     CustomerPaymentPreviewFailure.invalidResponse: 'Invalid payment response',
@@ -596,6 +597,18 @@ void main() {
         find.byKey(const ValueKey('retryPaymentPreviewButton')),
         findsOneWidget,
       );
+      if (entry.key == CustomerPaymentPreviewFailure.authentication) {
+        expect(find.textContaining('authenticated session'), findsOneWidget);
+        expect(find.textContaining('account is active'), findsNothing);
+      }
+      if (entry.key == CustomerPaymentPreviewFailure.accountNotReady) {
+        expect(
+          find.textContaining('cannot currently access QR payment previews'),
+          findsOneWidget,
+        );
+        expect(find.textContaining('account is active'), findsOneWidget);
+        expect(find.textContaining('sign in again'), findsNothing);
+      }
     });
   }
 

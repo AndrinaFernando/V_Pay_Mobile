@@ -573,6 +573,8 @@ void main() {
 
   final failureCases = <CustomerPaymentPreviewFailure, String>{
     CustomerPaymentPreviewFailure.unknownReference: 'Payment not found',
+    CustomerPaymentPreviewFailure.customerProfileNotFound:
+        'Customer profile not found',
     CustomerPaymentPreviewFailure.expired: 'Payment expired',
     CustomerPaymentPreviewFailure.alreadyUsed: 'Payment already used',
     CustomerPaymentPreviewFailure.authentication: 'Session verification failed',
@@ -608,6 +610,13 @@ void main() {
         );
         expect(find.textContaining('account is active'), findsOneWidget);
         expect(find.textContaining('sign in again'), findsNothing);
+      }
+      if (entry.key == CustomerPaymentPreviewFailure.customerProfileNotFound) {
+        expect(
+          find.textContaining('Complete your account setup'),
+          findsOneWidget,
+        );
+        expect(find.textContaining('contact VPay support'), findsOneWidget);
       }
     });
   }

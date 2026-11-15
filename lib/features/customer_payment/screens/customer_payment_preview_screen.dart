@@ -986,6 +986,12 @@ _ErrorCopy _errorCopy(CustomerPaymentPreviewFailure failure) {
       icon: Icons.search_off_rounded,
       color: _error,
     ),
+    CustomerPaymentPreviewFailure.customerProfileNotFound => const _ErrorCopy(
+      title: 'Customer profile not found',
+      message: 'VPay could not find your Customer profile. Complete your account setup, then try again, or contact VPay support if you need help.',
+      icon: Icons.person_search_outlined,
+      color: _warning,
+    ),
     CustomerPaymentPreviewFailure.expired => const _ErrorCopy(
       title: 'Payment expired',
       message: 'This payment request is no longer active. Ask the merchant to generate a new QR code.',

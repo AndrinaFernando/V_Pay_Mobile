@@ -190,7 +190,7 @@ void main() {
     },
   );
 
-  test('maps unknown-reference and invalid responses', () async {
+  test('distinguishes coded and legacy not-found responses', () async {
     Future<CustomerPaymentPreviewException> errorFor(
       http.Response response,
     ) async {
@@ -205,12 +205,59 @@ void main() {
     }
 
     expect(
-      (await errorFor(http.Response('{}', 404))).failure,
-      CustomerPaymentPreviewFailure.unknownReference,
+      (await errorFor(
+        http.Response(
+          jsonEncode({
+            'success': false,
+            'code': 'CUSTOMER_PROFILE_NOT_FOUND',
+            'message': 'VPay user profile not found',
+          }),
+          404,
+        ),
+      )).failure,
+      CustomerPaymentPreviewFailure.customerProfileNotFound,
     );
     expect(
-      (await errorFor(http.Response('{"success":true}', 200))).failure,
-      CustomerPaymentPreviewFailure.invalidResponse,
+      (await errorFor(
+        http.Response(
+          jsonEncode({
+            'success': false,
+            'code': 'PAYMENT_INTENT_NOT_FOUND',
+            'message': 'Payment intent not found',
+          }),
+          404,
+        ),
+      )).failure,
+      CustomerPaymentPreviewFailure.unknownReference,
+    );
+    for (final body in [
+      '{}',
+      'not-json',
+      '{"code":42}',
+      '{"error":{"code":"CUSTOMER_PROFILE_NOT_FOUND"}}',
+    ]) {
+      expect(
+        (await errorFor(http.Response(body, 404))).failure,
+        CustomerPaymentPreviewFailure.unknownReference,
+      );
+    }
+  });
+
+  test('maps invalid successful responses', () async {
+    final apiClient = _FakeApiClient(
+      (_) async => http.Response('{"success":true}', 200),
+    );
+    final service = ApiCustomerPaymentPreviewService(apiClient: apiClient);
+
+    expect(
+      () => service.getPreview('payment-ref'),
+      throwsA(
+        isA<CustomerPaymentPreviewException>().having(
+          (error) => error.failure,
+          'failure',
+          CustomerPaymentPreviewFailure.invalidResponse,
+        ),
+      ),
     );
   });
 }

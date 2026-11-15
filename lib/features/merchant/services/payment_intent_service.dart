@@ -17,6 +17,8 @@ abstract interface class PaymentIntentService {
   Future<MerchantPaymentIntent> getPaymentIntent({
     required String paymentReference,
   });
+
+  Future<List<MerchantPaymentIntent>> listPaymentIntents({int limit = 20});
 }
 
 abstract interface class PaymentIntentApiClient {
@@ -132,6 +134,67 @@ class ApiPaymentIntentService implements PaymentIntentService {
       );
     }
     return intent;
+  }
+
+  @override
+  Future<List<MerchantPaymentIntent>> listPaymentIntents({
+    int limit = 20,
+  }) async {
+    if (limit < 1 || limit > 50) {
+      throw ArgumentError.value(limit, 'limit', 'must be between 1 and 50');
+    }
+
+    final http.Response response;
+    try {
+      response = await _apiClient
+          .authenticatedGet('/api/payment-intents?limit=$limit')
+          .timeout(const Duration(seconds: 15));
+    } on TimeoutException {
+      rethrow;
+    } on SocketException {
+      rethrow;
+    } on http.ClientException {
+      rethrow;
+    }
+
+    if (response.statusCode != 200) {
+      throw ApiException(
+        response.statusCode,
+        _responseMessage(response.body, response.statusCode),
+      );
+    }
+
+    try {
+      final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+      final data = decoded['data'] as Map<String, dynamic>;
+      final rawIntents = data['paymentIntents'] as List<dynamic>;
+      if (decoded['success'] != true) {
+        throw const FormatException('Invalid payment intent list envelope');
+      }
+      return rawIntents
+          .map((rawIntent) {
+            final intent = MerchantPaymentIntent.fromJson(
+              rawIntent as Map<String, dynamic>,
+            );
+            const allowedStatuses = {
+              'PENDING',
+              'PROCESSING',
+              'SUCCESS',
+              'FAILED',
+              'EXPIRED',
+            };
+            if (intent.currency != 'LKR' ||
+                !allowedStatuses.contains(intent.status)) {
+              throw const FormatException('Invalid payment intent in list');
+            }
+            return intent;
+          })
+          .toList(growable: false);
+    } on FormatException {
+      throw const ApiException(200, 'VPay returned an invalid payment list.');
+    } on TypeError {
+      throw const ApiException(200, 'VPay returned an invalid payment list.');
+    }
   }
 
   MerchantPaymentIntent _parseIntentResponse(String responseBody) {

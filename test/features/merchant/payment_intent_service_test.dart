@@ -199,4 +199,31 @@ void main() {
       throwsA(isA<ApiException>()),
     );
   });
+
+  test(
+    'lists merchant payment intents through the authenticated endpoint',
+    () async {
+      final apiClient = _FakeApiClient(
+        http.Response('', 201),
+        getResponse: http.Response(
+          jsonEncode({
+            'success': true,
+            'data': {
+              'paymentIntents': [
+                _intentJson(status: 'PENDING'),
+                _intentJson(status: 'SUCCESS'),
+              ],
+            },
+          }),
+          200,
+        ),
+      );
+      final service = ApiPaymentIntentService(apiClient: apiClient);
+
+      final intents = await service.listPaymentIntents(limit: 7);
+
+      expect(apiClient.getPath, '/api/payment-intents?limit=7');
+      expect(intents.map((intent) => intent.status), ['PENDING', 'SUCCESS']);
+    },
+  );
 }

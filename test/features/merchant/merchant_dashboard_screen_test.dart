@@ -10,6 +10,7 @@ import 'package:vpay_mobile/features/merchant/models/merchant_balance.dart';
 import 'package:vpay_mobile/features/merchant/models/merchant_payment_intent.dart';
 import 'package:vpay_mobile/features/merchant/models/merchant_received_payment.dart';
 import 'package:vpay_mobile/features/merchant/screens/merchant_dashboard_screen.dart';
+import 'package:vpay_mobile/features/merchant/screens/payment_intent_qr_screen.dart';
 import 'package:vpay_mobile/features/merchant/services/merchant_balance_service.dart';
 import 'package:vpay_mobile/features/merchant/services/merchant_received_payments_service.dart';
 import 'package:vpay_mobile/features/merchant/services/payment_intent_service.dart';
@@ -117,6 +118,72 @@ MerchantReceivedPayment _receivedPayment({
 }
 
 void main() {
+  testWidgets('system Back closes QR then Create before tab history', (
+    tester,
+  ) async {
+    final now = DateTime.now();
+    final pending = MerchantPaymentIntent(
+      paymentReference: 'back-navigation-request',
+      merchantName: 'Central Canteen',
+      amountMinor: 1000,
+      currency: 'LKR',
+      status: 'PENDING',
+      createdAt: now,
+      expiresAt: now.add(const Duration(minutes: 15)),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MerchantDashboardScreen(
+          profile: _merchantProfile,
+          merchantBalanceService: _FakeMerchantBalanceService(),
+          merchantReceivedPaymentsService:
+              _FakeMerchantReceivedPaymentsService(),
+          paymentIntentService: _FakePaymentIntentService(
+            createdIntent: pending,
+            statusResponses: [pending],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Payments').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Create').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('paymentAmountField')),
+      '10.00',
+    );
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('createPaymentRequestButton')),
+      100,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.byKey(const Key('createPaymentRequestButton')));
+    await tester.pumpAndSettle();
+    expect(find.byType(BottomNavigationBar), findsNothing);
+    expect(find.byType(PaymentIntentQrScreen), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('Request a payment'), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<BottomNavigationBar>(find.byType(BottomNavigationBar))
+          .currentIndex,
+      2,
+    );
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<BottomNavigationBar>(find.byType(BottomNavigationBar))
+          .currentIndex,
+      0,
+    );
+  });
+
   testWidgets(
     'merchant transition preserves dashboard scroll and profile tab',
     (tester) async {

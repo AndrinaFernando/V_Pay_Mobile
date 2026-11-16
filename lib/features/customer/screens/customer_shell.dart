@@ -59,6 +59,7 @@ class _CustomerShellState extends State<CustomerShell>
     with SingleTickerProviderStateMixin {
   late VPayUserProfile _profile;
   int _selectedIndex = 0;
+  final List<int> _tabHistory = [];
   late final AnimationController _tabAnimation = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 220),
@@ -135,13 +136,19 @@ class _CustomerShellState extends State<CustomerShell>
     setState(() => _profile = profile);
   }
 
-  void _selectTab(int index) {
+  void _selectTab(int index, {bool remember = true}) {
     if (index == _selectedIndex) return;
+    if (remember) _tabHistory.add(_selectedIndex);
     final enteringActivity = index == 2;
     setState(() => _selectedIndex = index);
     if (enteringActivity) _refreshTransactions();
     if (MediaQuery.disableAnimationsOf(context)) return;
     _tabAnimation.forward(from: 0);
+  }
+
+  void _goBackTab() {
+    if (_tabHistory.isEmpty) return;
+    _selectTab(_tabHistory.removeLast(), remember: false);
   }
 
   @override
@@ -178,77 +185,85 @@ class _CustomerShellState extends State<CustomerShell>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        bottom: false,
-        child: VPayTabTransition(
-          animation: _tabAnimation,
-          child: IndexedStack(
-            index: _selectedIndex,
-            children: [
-              CustomerHomeScreen(
-                profile: _profile,
-                cardApiService: widget.cardApiService,
-                onScanAndPay: _openQrScanner,
-                balanceRefreshTrigger: _balanceRefreshTrigger,
-                transactionsFuture: _transactionsFuture,
-                onRefreshTransactions: _refreshTransactions,
-                onTopUpReturned: _refreshAfterTopUp,
-                topUpService: widget.topUpService,
+    // Detail routes and modals are above this route and handle Back first.
+    return PopScope<Object?>(
+      canPop: _tabHistory.isEmpty,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _goBackTab();
+      },
+      child: Scaffold(
+        backgroundColor: Colors.white,
+        body: SafeArea(
+          bottom: false,
+          child: VPayTabTransition(
+            animation: _tabAnimation,
+            child: IndexedStack(
+              index: _selectedIndex,
+              children: [
+                CustomerHomeScreen(
+                  profile: _profile,
+                  cardApiService: widget.cardApiService,
+                  onScanAndPay: _openQrScanner,
+                  balanceRefreshTrigger: _balanceRefreshTrigger,
+                  transactionsFuture: _transactionsFuture,
+                  onRefreshTransactions: _refreshTransactions,
+                  onTopUpReturned: _refreshAfterTopUp,
+                  topUpService: widget.topUpService,
+                ),
+                _ScanAndPayTab(onScan: _openQrScanner),
+                CustomerActivityScreen(
+                  transactionsFuture: _transactionsFuture,
+                  onRefresh: _refreshTransactions,
+                ),
+                ProfileScreen(
+                  profile: _profile,
+                  authService: widget.authService,
+                  userApiService: widget.userApiService,
+                  onProfileUpdated: _onProfileUpdated,
+                  onBack: _goBackTab,
+                ),
+              ],
+            ),
+          ),
+        ),
+        bottomNavigationBar: DecoratedBox(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: Color(0xFFEBEBEB))),
+          ),
+          child: BottomNavigationBar(
+            currentIndex: _selectedIndex,
+            onTap: _selectTab,
+            type: BottomNavigationBarType.fixed,
+            backgroundColor: Colors.white,
+            elevation: 0,
+            selectedItemColor: _electric,
+            unselectedItemColor: _secondary,
+            selectedFontSize: 12,
+            unselectedFontSize: 12,
+            showUnselectedLabels: true,
+            items: const [
+              BottomNavigationBarItem(
+                icon: Icon(Icons.home_outlined),
+                activeIcon: Icon(Icons.home_rounded),
+                label: 'Home',
               ),
-              _ScanAndPayTab(onScan: _openQrScanner),
-              CustomerActivityScreen(
-                transactionsFuture: _transactionsFuture,
-                onRefresh: _refreshTransactions,
+              BottomNavigationBarItem(
+                icon: Icon(Icons.qr_code_scanner_rounded),
+                label: 'Scan & Pay',
               ),
-              ProfileScreen(
-                profile: _profile,
-                authService: widget.authService,
-                userApiService: widget.userApiService,
-                onProfileUpdated: _onProfileUpdated,
+              BottomNavigationBarItem(
+                icon: Icon(Icons.receipt_long_outlined),
+                activeIcon: Icon(Icons.receipt_long_rounded),
+                label: 'Activity',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.person_outline_rounded),
+                activeIcon: Icon(Icons.person_rounded),
+                label: 'Profile',
               ),
             ],
           ),
-        ),
-      ),
-      bottomNavigationBar: DecoratedBox(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          border: Border(top: BorderSide(color: Color(0xFFEBEBEB))),
-        ),
-        child: BottomNavigationBar(
-          currentIndex: _selectedIndex,
-          onTap: _selectTab,
-          type: BottomNavigationBarType.fixed,
-          backgroundColor: Colors.white,
-          elevation: 0,
-          selectedItemColor: _electric,
-          unselectedItemColor: _secondary,
-          selectedFontSize: 12,
-          unselectedFontSize: 12,
-          showUnselectedLabels: true,
-          items: const [
-            BottomNavigationBarItem(
-              icon: Icon(Icons.home_outlined),
-              activeIcon: Icon(Icons.home_rounded),
-              label: 'Home',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.qr_code_scanner_rounded),
-              label: 'Scan & Pay',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.receipt_long_outlined),
-              activeIcon: Icon(Icons.receipt_long_rounded),
-              label: 'Activity',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline_rounded),
-              activeIcon: Icon(Icons.person_rounded),
-              label: 'Profile',
-            ),
-          ],
         ),
       ),
     );

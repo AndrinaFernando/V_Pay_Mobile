@@ -1,6 +1,10 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import 'package:flutter/foundation.dart';
+
+import '../../core/notifications/firebase_notifications.dart';
+import '../../core/notifications/notification_open_coordinator.dart';
 import '../card/services/card_api_service.dart';
 import '../customer/services/customer_transaction_service.dart';
 import '../merchant/services/merchant_balance_service.dart';
@@ -35,11 +39,23 @@ class AuthGate extends StatefulWidget {
 
 class _AuthGateState extends State<AuthGate> {
   late final AuthService _authService;
+  NotificationOpenCoordinator? _notificationOpens;
 
   @override
   void initState() {
     super.initState();
     _authService = widget.authService ?? AuthService();
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        _notificationOpens = firebaseNotificationOpens(_authService);
+      } catch (_) {}
+    }
+  }
+
+  @override
+  void dispose() {
+    _notificationOpens?.dispose();
+    super.dispose();
   }
 
   void _refreshUserState() {
@@ -74,6 +90,7 @@ class _AuthGateState extends State<AuthGate> {
           key: ValueKey(user.uid),
           authService: _authService,
           userApiService: widget.userApiService,
+          notificationOpens: _notificationOpens,
           cardApiService: widget.cardApiService,
           customerTransactionService: widget.customerTransactionService,
           merchantBalanceService: widget.merchantBalanceService,

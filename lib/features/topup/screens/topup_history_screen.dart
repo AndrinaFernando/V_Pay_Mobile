@@ -74,28 +74,33 @@ class _TopUpHistoryScreenState extends State<TopUpHistoryScreen> {
     body: FutureBuilder<List<TopUp>>(
       future: _history,
       builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done)
+        if (snapshot.connectionState != ConnectionState.done) {
           return const Center(child: CircularProgressIndicator());
-        if (snapshot.hasError)
+        }
+        if (snapshot.hasError) {
           return Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Text('Could not load top-up history.'),
                 TextButton(
-                  onPressed: () =>
-                      setState(() => _history = widget.service.list()),
+                  onPressed: () => setState(() {
+                    _history = widget.service.list();
+                  }),
                   child: const Text('Try again'),
                 ),
               ],
             ),
           );
+        }
         final items = snapshot.data ?? [];
         if (items.isEmpty) return const Center(child: Text('No top-ups yet.'));
         return RefreshIndicator(
           onRefresh: () async {
             final future = widget.service.list();
-            setState(() => _history = future);
+            setState(() {
+              _history = future;
+            });
             try {
               await future;
             } catch (_) {}

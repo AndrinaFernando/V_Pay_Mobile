@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import '../../../core/network/api_exception.dart';
+import '../../../core/widgets/loading/vpay_loading.dart';
 import '../../auth/models/vpay_user_profile.dart';
 import '../../card/models/vpay_card.dart';
 import '../../card/services/card_api_service.dart';
@@ -112,7 +113,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
                   future: _cardFuture,
                   builder: (context, snapshot) {
                     if (snapshot.connectionState != ConnectionState.done) {
-                      return const _CardLoadingState();
+                      return const VPayCardSkeleton();
                     }
 
                     if (snapshot.hasError || !snapshot.hasData) {
@@ -539,29 +540,6 @@ class _CardStatusPill extends StatelessWidget {
               fontWeight: FontWeight.w700,
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CardLoadingState extends StatelessWidget {
-  const _CardLoadingState();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 56, horizontal: 24),
-      decoration: BoxDecoration(
-        color: _surface,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: const Column(
-        children: [
-          CircularProgressIndicator(color: _electric),
-          SizedBox(height: 16),
-          Text('Loading your VPay card…', style: TextStyle(color: _supporting)),
         ],
       ),
     );

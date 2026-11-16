@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../core/widgets/loading/vpay_loading.dart';
+
 import '../auth/auth_service.dart';
 import '../auth/models/user_profile_result.dart';
 import '../auth/models/vpay_user_profile.dart';
@@ -173,12 +175,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildBody() {
     if (_isLoading) {
-      return const Center(
-        child: CircularProgressIndicator(
-          key: Key('profileLoading'),
-          color: VPayColors.electric,
-        ),
-      );
+      return const VPayProfileSkeleton();
     }
     if (_loadError != null || _profile == null) {
       return Center(

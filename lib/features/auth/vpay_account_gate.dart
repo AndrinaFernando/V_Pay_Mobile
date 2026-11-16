@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/network/api_exception.dart';
+import '../../core/widgets/loading/vpay_loading.dart';
 import '../customer/screens/customer_shell.dart';
 import '../merchant/screens/merchant_dashboard_screen.dart';
 import 'app_access_gate.dart';
@@ -47,11 +48,7 @@ class _VPayAccountGateState extends State<VPayAccountGate> {
       future: _profileCheck,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return const Scaffold(
-            body: Center(
-              child: CircularProgressIndicator(color: Color(0xFF0072DC)),
-            ),
-          );
+          return const Scaffold(body: SafeArea(child: VPayProfileSkeleton()));
         }
 
         if (snapshot.hasError) {

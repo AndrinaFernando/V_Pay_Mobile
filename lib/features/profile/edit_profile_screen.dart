@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import '../../core/network/api_exception.dart';
+import '../../core/widgets/loading/vpay_loading.dart';
 import '../auth/models/vpay_user_profile.dart';
 import '../auth/services/user_api_service.dart';
 import 'vpay_colors.dart';
@@ -236,159 +237,174 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         ),
         body: SafeArea(
           top: false,
-          child: Form(
-            key: _formKey,
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: VPayColors.canvas,
-                    border: Border.all(color: VPayColors.divider),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+          child: Column(
+            children: [
+              if (_saving)
+                const VPayProcessingIndicator(label: 'Saving profile'),
+              Expanded(
+                child: Form(
+                  key: _formKey,
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
                     children: [
-                      TextFormField(
-                        key: const Key('editName'),
-                        controller: _name,
-                        enabled: !_saving,
-                        textCapitalization: TextCapitalization.words,
-                        decoration: _decoration(
-                          _merchant ? "Contact Person's Name" : 'Full Name',
+                      Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: VPayColors.canvas,
+                          border: Border.all(color: VPayColors.divider),
+                          borderRadius: BorderRadius.circular(16),
                         ),
-                        validator: _validateName,
-                      ),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        key: const Key('editEmail'),
-                        controller: _email,
-                        readOnly: true,
-                        decoration: _decoration('Email Address', locked: true),
-                      ),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        key: const Key('editPhone'),
-                        controller: _phone,
-                        enabled: !_saving,
-                        keyboardType: TextInputType.phone,
-                        decoration: _decoration('Mobile Number'),
-                        validator: _validatePhone,
-                      ),
-                      if (_merchant) ...[
-                        const SizedBox(height: 16),
-                        TextFormField(
-                          key: const Key('editBusinessName'),
-                          controller: _businessName,
-                          enabled: !_saving,
-                          decoration: _decoration('Business Name'),
-                          validator: _validateBusinessName,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            TextFormField(
+                              key: const Key('editName'),
+                              controller: _name,
+                              enabled: !_saving,
+                              textCapitalization: TextCapitalization.words,
+                              decoration: _decoration(
+                                _merchant
+                                    ? "Contact Person's Name"
+                                    : 'Full Name',
+                              ),
+                              validator: _validateName,
+                            ),
+                            const SizedBox(height: 16),
+                            TextFormField(
+                              key: const Key('editEmail'),
+                              controller: _email,
+                              readOnly: true,
+                              decoration: _decoration(
+                                'Email Address',
+                                locked: true,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            TextFormField(
+                              key: const Key('editPhone'),
+                              controller: _phone,
+                              enabled: !_saving,
+                              keyboardType: TextInputType.phone,
+                              decoration: _decoration('Mobile Number'),
+                              validator: _validatePhone,
+                            ),
+                            if (_merchant) ...[
+                              const SizedBox(height: 16),
+                              TextFormField(
+                                key: const Key('editBusinessName'),
+                                controller: _businessName,
+                                enabled: !_saving,
+                                decoration: _decoration('Business Name'),
+                                validator: _validateBusinessName,
+                              ),
+                              const SizedBox(height: 16),
+                              DropdownButtonFormField<String>(
+                                key: const Key('editBusinessCategory'),
+                                initialValue: _category,
+                                decoration: _decoration('Business Category'),
+                                items: _categories
+                                    .map(
+                                      (category) => DropdownMenuItem(
+                                        value: category,
+                                        child: Text(category),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged: _saving
+                                    ? null
+                                    : (value) =>
+                                          setState(() => _category = value),
+                                validator: (value) =>
+                                    _categories.contains(value)
+                                    ? null
+                                    : 'Choose a business category.',
+                              ),
+                              const SizedBox(height: 16),
+                              TextFormField(
+                                key: const Key('editBusinessAddress'),
+                                controller: _businessAddress,
+                                enabled: !_saving,
+                                minLines: 2,
+                                maxLines: 4,
+                                keyboardType: TextInputType.multiline,
+                                decoration: _decoration('Business Address'),
+                                validator: _validateAddress,
+                              ),
+                            ],
+                          ],
                         ),
+                      ),
+                      if (_error != null) ...[
                         const SizedBox(height: 16),
-                        DropdownButtonFormField<String>(
-                          key: const Key('editBusinessCategory'),
-                          initialValue: _category,
-                          decoration: _decoration('Business Category'),
-                          items: _categories
-                              .map(
-                                (category) => DropdownMenuItem(
-                                  value: category,
-                                  child: Text(category),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: _saving
-                              ? null
-                              : (value) => setState(() => _category = value),
-                          validator: (value) => _categories.contains(value)
-                              ? null
-                              : 'Choose a business category.',
-                        ),
-                        const SizedBox(height: 16),
-                        TextFormField(
-                          key: const Key('editBusinessAddress'),
-                          controller: _businessAddress,
-                          enabled: !_saving,
-                          minLines: 2,
-                          maxLines: 4,
-                          keyboardType: TextInputType.multiline,
-                          decoration: _decoration('Business Address'),
-                          validator: _validateAddress,
+                        Text(
+                          _error!,
+                          key: const Key('editSaveError'),
+                          style: const TextStyle(color: VPayColors.error),
                         ),
                       ],
+                      const SizedBox(height: 24),
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          final buttons = [
+                            OutlinedButton(
+                              key: const Key('editCancel'),
+                              onPressed: _saving ? null : _leave,
+                              style: OutlinedButton.styleFrom(
+                                minimumSize: const Size(0, 52),
+                                foregroundColor: VPayColors.ink,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              child: const Text('Cancel'),
+                            ),
+                            ElevatedButton(
+                              key: const Key('editSave'),
+                              onPressed: _saving ? null : _save,
+                              style: ElevatedButton.styleFrom(
+                                minimumSize: const Size(0, 52),
+                                backgroundColor: VPayColors.electric,
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              child: _saving
+                                  ? const SizedBox(
+                                      width: 22,
+                                      height: 22,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : const Text('Save Changes'),
+                            ),
+                          ];
+                          if (constraints.maxWidth < 300) {
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                buttons[1],
+                                const SizedBox(height: 12),
+                                buttons[0],
+                              ],
+                            );
+                          }
+                          return Row(
+                            children: [
+                              Expanded(child: buttons[0]),
+                              const SizedBox(width: 12),
+                              Expanded(child: buttons[1]),
+                            ],
+                          );
+                        },
+                      ),
                     ],
                   ),
                 ),
-                if (_error != null) ...[
-                  const SizedBox(height: 16),
-                  Text(
-                    _error!,
-                    key: const Key('editSaveError'),
-                    style: const TextStyle(color: VPayColors.error),
-                  ),
-                ],
-                const SizedBox(height: 24),
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final buttons = [
-                      OutlinedButton(
-                        key: const Key('editCancel'),
-                        onPressed: _saving ? null : _leave,
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size(0, 52),
-                          foregroundColor: VPayColors.ink,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: const Text('Cancel'),
-                      ),
-                      ElevatedButton(
-                        key: const Key('editSave'),
-                        onPressed: _saving ? null : _save,
-                        style: ElevatedButton.styleFrom(
-                          minimumSize: const Size(0, 52),
-                          backgroundColor: VPayColors.electric,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: _saving
-                            ? const SizedBox(
-                                width: 22,
-                                height: 22,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Text('Save Changes'),
-                      ),
-                    ];
-                    if (constraints.maxWidth < 300) {
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          buttons[1],
-                          const SizedBox(height: 12),
-                          buttons[0],
-                        ],
-                      );
-                    }
-                    return Row(
-                      children: [
-                        Expanded(child: buttons[0]),
-                        const SizedBox(width: 12),
-                        Expanded(child: buttons[1]),
-                      ],
-                    );
-                  },
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),

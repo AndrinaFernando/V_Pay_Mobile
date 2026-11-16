@@ -12,6 +12,8 @@ import '../../card/services/card_api_service.dart';
 import '../../topup/screens/topup_screen.dart';
 import '../../topup/services/topup_service.dart';
 import '../models/customer_transaction.dart';
+import '../services/customer_activity_service.dart';
+import '../widgets/customer_activity_notice.dart';
 import '../widgets/customer_transaction_tile.dart';
 
 const _electric = Color(0xFF0072DC);
@@ -365,20 +367,28 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
             }
 
             final transactions = snapshot.data ?? const [];
+            final warning =
+                transactions is CustomerActivityList && transactions.isPartial
+                ? transactions.warning
+                : null;
             if (transactions.isEmpty) {
-              return const _RecentActivityMessage(
+              return _RecentActivityMessage(
                 child: Column(
                   children: [
-                    Icon(
+                    if (warning != null)
+                      CustomerActivityNotice(message: warning),
+                    const Icon(
                       Icons.receipt_long_outlined,
                       color: _secondary,
                       size: 32,
                     ),
-                    SizedBox(height: 10),
+                    const SizedBox(height: 10),
                     Text(
-                      'No recent activity yet',
+                      warning == null
+                          ? 'No recent activity yet'
+                          : 'No activity from the available source',
                       textAlign: TextAlign.center,
-                      style: TextStyle(
+                      style: const TextStyle(
                         color: _supporting,
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
@@ -398,6 +408,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
               clipBehavior: Clip.antiAlias,
               child: Column(
                 children: [
+                  if (warning != null) CustomerActivityNotice(message: warning),
                   for (final transaction in recent)
                     CustomerTransactionTile(
                       transaction: transaction,

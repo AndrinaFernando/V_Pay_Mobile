@@ -4,6 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vpay_mobile/features/auth/auth_service.dart';
 import 'package:vpay_mobile/features/auth/models/vpay_user_profile.dart';
 import 'package:vpay_mobile/features/customer/screens/customer_shell.dart';
+import 'package:vpay_mobile/features/customer/models/customer_transaction.dart';
+import 'package:vpay_mobile/features/customer/services/customer_activity_service.dart';
 import 'package:vpay_mobile/core/widgets/navigation/vpay_tab_transition.dart';
 import 'package:vpay_mobile/features/topup/services/topup_service.dart';
 
@@ -43,6 +45,16 @@ class _FakeTopUps implements TopUpService {
   }
 }
 
+class _PartialTransactions extends FakeDashboardTransactionService {
+  @override
+  Future<List<CustomerTransaction>> getTransactions({int limit = 50}) async =>
+      CustomerActivityList(
+        const [],
+        paymentsUnavailable: true,
+        topUpsUnavailable: false,
+      );
+}
+
 CustomerShell _shell(AuthService auth) => CustomerShell(
   profile: _customerProfile,
   authService: auth,
@@ -51,6 +63,26 @@ CustomerShell _shell(AuthService auth) => CustomerShell(
 );
 
 void main() {
+  testWidgets('dashboard marks available activity as incomplete', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CustomerShell(
+          profile: _customerProfile,
+          authService: _FakeAuthService(),
+          cardApiService: FakeDashboardCardService(),
+          transactionService: _PartialTransactions(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('customerActivityIncompleteNotice')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('may be incomplete'), findsOneWidget);
+  });
   testWidgets(
     'returning from Top Up refreshes balance and both activity APIs',
     (tester) async {
@@ -80,9 +112,11 @@ void main() {
       await tester.tap(find.text('Activity').last);
       await tester.pumpAndSettle();
       expect((payments.requests, topUps.requests), (3, 3));
-      final refresh = tester.state<RefreshIndicatorState>(
-        find.byKey(const ValueKey('customerActivityRefreshIndicator')),
-      ).show();
+      final refresh = tester
+          .state<RefreshIndicatorState>(
+            find.byKey(const ValueKey('customerActivityRefreshIndicator')),
+          )
+          .show();
       await tester.pumpAndSettle();
       await refresh;
       expect((payments.requests, topUps.requests), (4, 4));

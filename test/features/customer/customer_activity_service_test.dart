@@ -44,7 +44,69 @@ class _TopUps implements TopUpService {
   ];
 }
 
+class _FailedPayments implements CustomerTransactionService {
+  @override
+  Future<List<CustomerTransaction>> getTransactions({int limit = 50}) async =>
+      throw StateError('payment API offline');
+}
+
+class _FailedTopUps implements TopUpService {
+  @override
+  Future<TopUp> create(int amount) => throw UnimplementedError();
+  @override
+  Future<TopUp> get(String id) => throw UnimplementedError();
+  @override
+  Future<List<TopUp>> list() async => throw StateError('top-up API offline');
+}
+
 void main() {
+  test(
+    'keeps top-ups when QR history fails and marks history incomplete',
+    () async {
+      final items =
+          await CustomerActivityService(
+                payments: _FailedPayments(),
+                topUps: _TopUps(),
+              ).getTransactions()
+              as CustomerActivityList;
+      expect(items.paymentsUnavailable, isTrue);
+      expect(items.topUpsUnavailable, isFalse);
+      expect(items.warning, contains('QR payment history'));
+      expect(items.map((item) => item.transactionId), [
+        'topup-latest',
+        'topup-failed',
+        'topup-pending',
+      ]);
+      expect(items.first.amountMinor, 500000);
+    },
+  );
+
+  test(
+    'keeps QR history when top-ups fail and marks history incomplete',
+    () async {
+      final items =
+          await CustomerActivityService(
+                payments: _Payments(),
+                topUps: _FailedTopUps(),
+              ).getTransactions()
+              as CustomerActivityList;
+      expect(items.topUpsUnavailable, isTrue);
+      expect(items.paymentsUnavailable, isFalse);
+      expect(items.warning, contains('Top-up history'));
+      expect(items.single.transactionId, 'qr-1');
+      expect(items.single.amountMinor, 120050);
+    },
+  );
+
+  test('reports an error when neither history source succeeds', () async {
+    await expectLater(
+      CustomerActivityService(
+        payments: _FailedPayments(),
+        topUps: _FailedTopUps(),
+      ).getTransactions(),
+      throwsStateError,
+    );
+  });
   test(
     'combines histories newest first and leaves undated records last',
     () async {

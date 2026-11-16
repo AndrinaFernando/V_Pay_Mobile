@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../models/customer_transaction.dart';
+import '../services/customer_activity_service.dart';
+import '../widgets/customer_activity_notice.dart';
 import '../widgets/customer_transaction_tile.dart';
 
 const _electric = Color(0xFF0072DC);
@@ -54,20 +56,36 @@ class CustomerActivityScreen extends StatelessWidget {
               }
 
               final transactions = snapshot.data ?? const [];
+              final warning =
+                  transactions is CustomerActivityList && transactions.isPartial
+                  ? transactions.warning
+                  : null;
               if (transactions.isEmpty) {
                 return RefreshIndicator(
                   key: const ValueKey('customerActivityRefreshIndicator'),
                   onRefresh: onRefresh,
                   color: _electric,
-                  child: const CustomScrollView(
-                    physics: AlwaysScrollableScrollPhysics(),
+                  child: CustomScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
                     slivers: [
                       SliverFillRemaining(
                         hasScrollBody: false,
-                        child: _ActivityMessage(
-                          icon: Icons.receipt_long_outlined,
-                          title: 'No payment activity yet',
-                          message: 'QR payments and top-ups will appear here.',
+                        child: Column(
+                          children: [
+                            if (warning != null)
+                              CustomerActivityNotice(message: warning),
+                            Expanded(
+                              child: _ActivityMessage(
+                                icon: Icons.receipt_long_outlined,
+                                title: warning == null
+                                    ? 'No payment activity yet'
+                                    : 'Available history is empty',
+                                message: warning == null
+                                    ? 'QR payments and top-ups will appear here.'
+                                    : 'Pull to refresh when your connection returns.',
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -82,21 +100,29 @@ class CustomerActivityScreen extends StatelessWidget {
                 child: ListView.builder(
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
-                  itemCount: transactions.length,
-                  itemBuilder: (context, index) => Material(
-                    color: _surface,
-                    borderRadius: index == 0
-                        ? const BorderRadius.vertical(top: Radius.circular(18))
-                        : index == transactions.length - 1
-                        ? const BorderRadius.vertical(
-                            bottom: Radius.circular(18),
-                          )
-                        : BorderRadius.zero,
-                    clipBehavior: Clip.antiAlias,
-                    child: CustomerTransactionTile(
-                      transaction: transactions[index],
-                    ),
-                  ),
+                  itemCount: transactions.length + (warning == null ? 0 : 1),
+                  itemBuilder: (context, index) {
+                    if (warning != null && index == 0) {
+                      return CustomerActivityNotice(message: warning);
+                    }
+                    final activityIndex = index - (warning == null ? 0 : 1);
+                    return Material(
+                      color: _surface,
+                      borderRadius: activityIndex == 0
+                          ? const BorderRadius.vertical(
+                              top: Radius.circular(18),
+                            )
+                          : activityIndex == transactions.length - 1
+                          ? const BorderRadius.vertical(
+                              bottom: Radius.circular(18),
+                            )
+                          : BorderRadius.zero,
+                      clipBehavior: Clip.antiAlias,
+                      child: CustomerTransactionTile(
+                        transaction: transactions[activityIndex],
+                      ),
+                    );
+                  },
                 ),
               );
             },

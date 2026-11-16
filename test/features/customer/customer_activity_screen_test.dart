@@ -7,8 +7,10 @@ import 'package:vpay_mobile/core/network/api_client.dart';
 import 'package:vpay_mobile/features/auth/auth_service.dart';
 import 'package:vpay_mobile/features/customer/models/customer_transaction.dart';
 import 'package:vpay_mobile/features/customer/screens/customer_activity_screen.dart';
+import 'package:vpay_mobile/features/customer/services/customer_activity_service.dart';
 import 'package:vpay_mobile/features/customer/services/customer_transaction_service.dart';
 import 'package:vpay_mobile/features/customer_payment/models/customer_payment_preview.dart';
+import 'package:vpay_mobile/features/topup/services/topup_service.dart';
 
 class _FakeApiClient extends ApiClient {
   _FakeApiClient(this.response) : super(authService: _FakeAuthService());
@@ -45,6 +47,54 @@ CustomerTransaction _transaction({
 }
 
 void main() {
+  for (final missingPayments in [true, false]) {
+    testWidgets(
+      'partial activity shows available records and a warning (${missingPayments ? 'QR' : 'top-ups'} unavailable)',
+      (tester) async {
+        final records = CustomerActivityList(
+          [
+            if (missingPayments)
+              CustomerTransaction.fromTopUp(
+                const TopUp(
+                  id: 'topup-1',
+                  status: 'SUCCESS',
+                  requestedAmount: 50,
+                  amount: 50,
+                ),
+              )
+            else
+              _transaction(
+                id: 'qr-1',
+                merchant: 'ABC Store',
+                createdAt: DateTime.utc(2026, 11, 15),
+              ),
+          ],
+          paymentsUnavailable: missingPayments,
+          topUpsUnavailable: !missingPayments,
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: CustomerActivityScreen(
+                transactionsFuture: Future.value(records),
+                onRefresh: () async {},
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const ValueKey('customerActivityIncompleteNotice')),
+          findsOneWidget,
+        );
+        expect(find.textContaining('may be incomplete'), findsOneWidget);
+        expect(
+          find.text(missingPayments ? 'Rupio Top-up' : 'ABC Store'),
+          findsOneWidget,
+        );
+      },
+    );
+  }
   test('authenticated history service parses and sorts newest first', () async {
     final client = _FakeApiClient(
       http.Response(

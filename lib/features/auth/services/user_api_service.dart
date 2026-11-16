@@ -61,16 +61,52 @@ class UserApiService {
     }
 
     try {
-      final json = jsonDecode(response.body) as Map<String, dynamic>;
-      final data = json['data'] as Map<String, dynamic>;
-      final user = data['user'] as Map<String, dynamic>;
-
-      return UserProfileResult.found(VPayUserProfile.fromJson(user));
+      return UserProfileResult.found(_parseProfile(response.body));
     } on FormatException {
       throw const ApiException(200, 'Invalid user profile response');
     } on TypeError {
       throw const ApiException(200, 'Invalid user profile response');
     }
+  }
+
+  Future<VPayUserProfile> updateCurrentUserProfile({
+    String? name,
+    String? phone,
+    String? businessName,
+    String? businessCategory,
+    String? businessAddress,
+  }) async {
+    final body = <String, String>{
+      'name': ?name?.trim(),
+      'phone': ?phone?.trim(),
+      'businessName': ?businessName?.trim(),
+      'businessCategory': ?businessCategory,
+      'businessAddress': ?businessAddress?.trim(),
+    };
+    if (body.isEmpty) {
+      throw const ApiException(400, 'No profile changes to save.');
+    }
+    final response = await _apiClient.authenticatedPatch('/api/me', body: body);
+    if (response.statusCode != 200) {
+      throw ApiException(
+        response.statusCode,
+        _errorMessage(response.body, response.statusCode),
+      );
+    }
+    try {
+      return _parseProfile(response.body);
+    } on FormatException {
+      throw const ApiException(200, 'Invalid user profile response');
+    } on TypeError {
+      throw const ApiException(200, 'Invalid user profile response');
+    }
+  }
+
+  VPayUserProfile _parseProfile(String body) {
+    final json = jsonDecode(body) as Map<String, dynamic>;
+    final data = json['data'] as Map<String, dynamic>;
+    final user = data['user'] as Map<String, dynamic>;
+    return VPayUserProfile.fromJson(user);
   }
 
   String _errorMessage(String body, int statusCode) {
@@ -87,7 +123,8 @@ class UserApiService {
     return switch (statusCode) {
       401 => 'Authentication is required',
       403 => 'Email verification is required',
-      _ => 'Failed to retrieve user profile',
+      404 => 'VPay user profile not found',
+      _ => 'Unable to complete your profile request. Please try again.',
     };
   }
 }

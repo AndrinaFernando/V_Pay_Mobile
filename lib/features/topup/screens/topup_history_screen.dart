@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/loading/vpay_loading.dart';
+
 import '../services/topup_service.dart';
 
 class TopUpHistoryScreen extends StatefulWidget {
@@ -75,7 +77,7 @@ class _TopUpHistoryScreenState extends State<TopUpHistoryScreen> {
       future: _history,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(child: CircularProgressIndicator());
+          return const VPayListSkeleton();
         }
         if (snapshot.hasError) {
           return Center(

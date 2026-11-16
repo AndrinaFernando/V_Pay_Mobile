@@ -26,6 +26,8 @@ class _RupioCheckoutScreenState extends State<RupioCheckoutScreen> {
   Timer? _timer;
   bool _checking = false;
   bool _loading = true;
+  bool _returnRequested = false;
+  TopUp? _terminalResult;
   String? _error;
 
   @override
@@ -33,6 +35,17 @@ class _RupioCheckoutScreenState extends State<RupioCheckoutScreen> {
     super.initState();
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..addJavaScriptChannel(
+        'RupioCheckout',
+        onMessageReceived: (message) {
+          if (message.message != 'return-home') return;
+          _returnRequested = true;
+          final result = _terminalResult;
+          if (result != null && mounted) {
+            Navigator.of(context).pop(result);
+          }
+        },
+      )
       ..setNavigationDelegate(
         NavigationDelegate(
           onNavigationRequest: (request) {
@@ -86,14 +99,19 @@ class _RupioCheckoutScreenState extends State<RupioCheckoutScreen> {
         'CANCELLED',
         'TIMEOUT',
       }.contains(result.status)) {
-        Navigator.of(context).pop(result);
+        _terminalResult = result;
+        if (mounted) setState(() {});
+        _timer?.cancel();
+        if (_returnRequested && mounted) {
+          Navigator.of(context).pop(result);
+        }
         return;
       }
     } catch (_) {
       // Keep checkout available and retry; network errors are not payment results.
     } finally {
       _checking = false;
-      if (mounted) _schedule();
+      if (mounted && _terminalResult == null) _schedule();
     }
   }
 
@@ -121,10 +139,13 @@ class _RupioCheckoutScreenState extends State<RupioCheckoutScreen> {
               ],
             ),
           Expanded(child: WebViewWidget(controller: _controller)),
-          const Padding(
-            padding: EdgeInsets.all(12),
-            child: Text('Waiting for payment confirmation from VPay.'),
-          ),
+          if (_terminalResult != null)
+            const Padding(
+              padding: EdgeInsets.all(12),
+              child: Text(
+                'Payment status is ready. Tap Return to Home in Rupio to finish.',
+              ),
+            ),
         ],
       ),
     ),

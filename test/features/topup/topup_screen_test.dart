@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vpay_mobile/core/network/api_exception.dart';
 import 'package:vpay_mobile/features/topup/screens/topup_screen.dart';
 import 'package:vpay_mobile/features/topup/services/topup_service.dart';
 
@@ -26,7 +29,65 @@ class FakeTopUpService implements TopUpService {
   Future<List<TopUp>> list() async => history;
 }
 
+class DelayedTopUpService extends FakeTopUpService {
+  final pending = Completer<TopUp>();
+  @override
+  Future<TopUp> create(int amount) {
+    createCalls++;
+    return pending.future;
+  }
+}
+
 void main() {
+  testWidgets('loading prevents duplicate checkout and resets on failure', (
+    tester,
+  ) async {
+    final service = DelayedTopUpService();
+    await tester.pumpWidget(MaterialApp(home: TopUpScreen(service: service)));
+    await tester.enterText(find.byType(TextField), '100');
+    await tester.tap(find.text('Continue to Rupio'));
+    await tester.pump();
+    expect(find.text('Starting checkout...'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    final button = tester.widget<FilledButton>(find.byType(FilledButton));
+    expect(button.onPressed, isNull);
+    expect(service.createCalls, 1);
+    service.pending.completeError(Exception('Offline'));
+    await tester.pump();
+    expect(find.text('Continue to Rupio'), findsOneWidget);
+    expect(
+      find.text(
+        'We couldn’t confirm if your top-up started. Check Top-up history before trying again.',
+      ),
+      findsOneWidget,
+    );
+  });
+  testWidgets('hides technical checkout errors and directs user to history', (
+    tester,
+  ) async {
+    final service = DelayedTopUpService();
+    await tester.pumpWidget(MaterialApp(home: TopUpScreen(service: service)));
+    await tester.enterText(find.byType(TextField), '100');
+    await tester.tap(find.text('Continue to Rupio'));
+    await tester.pump();
+    service.pending.completeError(
+      const ApiException(
+        503,
+        'Rupio staging is not configured on the backend.',
+      ),
+    );
+    await tester.pump();
+    expect(
+      find.text('Rupio staging is not configured on the backend.'),
+      findsNothing,
+    );
+    expect(
+      find.text(
+        'We couldn’t confirm if your top-up started. Check Top-up history before trying again.',
+      ),
+      findsOneWidget,
+    );
+  });
   testWidgets('history opens on a separate screen and shows details', (
     tester,
   ) async {
@@ -137,58 +198,60 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('pending history reopens the original checkout without creating a top-up', (
-    tester,
-  ) async {
-    final service = FakeTopUpService()..history = [
-      const TopUp(
-        id: 'existing_topup',
-        status: 'PENDING',
-        requestedAmount: 100,
-        checkoutUrl: 'https://rupio.example/checkout/existing',
-      ),
-    ];
-    Uri? openedUrl;
-    String? openedId;
-    await tester.pumpWidget(
-      MaterialApp(
-        home: TopUpScreen(
-          service: service,
-          checkoutBuilder: (uri, id, api) {
-            openedUrl = uri;
-            openedId = id;
-            return Scaffold(
-              body: Builder(
-                builder: (context) => TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Leave resumed checkout'),
+  testWidgets(
+    'pending history reopens the original checkout without creating a top-up',
+    (tester) async {
+      final service = FakeTopUpService()
+        ..history = [
+          const TopUp(
+            id: 'existing_topup',
+            status: 'PENDING',
+            requestedAmount: 100,
+            checkoutUrl: 'https://rupio.example/checkout/existing',
+          ),
+        ];
+      Uri? openedUrl;
+      String? openedId;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TopUpScreen(
+            service: service,
+            checkoutBuilder: (uri, id, api) {
+              openedUrl = uri;
+              openedId = id;
+              return Scaffold(
+                body: Builder(
+                  builder: (context) => TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Leave resumed checkout'),
+                  ),
                 ),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
-      ),
-    );
-    await tester.tap(find.text('Top-up history'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Waiting for payment confirmation'));
-    await tester.pumpAndSettle();
-    expect(find.text('Open checkout'), findsOneWidget);
-    await tester.tap(find.text('Open checkout'));
-    await tester.pumpAndSettle();
-    expect(openedId, 'existing_topup');
-    expect(openedUrl, Uri.parse('https://rupio.example/checkout/existing'));
-    expect(service.createCalls, 0);
-    await tester.tap(find.text('Leave resumed checkout'));
-    await tester.pumpAndSettle();
-    expect(find.text('Payment cancelled'), findsNothing);
-    expect(service.history.single.status, 'PENDING');
-    await tester.tap(find.text('Top-up history'));
-    await tester.pumpAndSettle();
-    expect(find.text('Waiting for payment confirmation'), findsOneWidget);
-    expect(find.text('Payment cancelled'), findsNothing);
-    expect(service.createCalls, 0);
-  });
+      );
+      await tester.tap(find.text('Top-up history'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Waiting for payment confirmation'));
+      await tester.pumpAndSettle();
+      expect(find.text('Open checkout'), findsOneWidget);
+      await tester.tap(find.text('Open checkout'));
+      await tester.pumpAndSettle();
+      expect(openedId, 'existing_topup');
+      expect(openedUrl, Uri.parse('https://rupio.example/checkout/existing'));
+      expect(service.createCalls, 0);
+      await tester.tap(find.text('Leave resumed checkout'));
+      await tester.pumpAndSettle();
+      expect(find.text('Payment cancelled'), findsNothing);
+      expect(service.history.single.status, 'PENDING');
+      await tester.tap(find.text('Top-up history'));
+      await tester.pumpAndSettle();
+      expect(find.text('Waiting for payment confirmation'), findsOneWidget);
+      expect(find.text('Payment cancelled'), findsNothing);
+      expect(service.createCalls, 0);
+    },
+  );
 
   testWidgets('rejects an invalid amount without starting checkout', (
     tester,
@@ -201,7 +264,9 @@ void main() {
     await tester.pump();
     expect(service.createdAmount, isNull);
     expect(
-      find.text('Enter a whole amount from Rs. 1 to Rs. 1,000,000.'),
+      find.text(
+        'Invalid amount. Enter a whole number from Rs. 1 to Rs. 1,000,000.',
+      ),
       findsOneWidget,
     );
   });

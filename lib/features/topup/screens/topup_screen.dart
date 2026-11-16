@@ -8,6 +8,8 @@ import 'topup_history_screen.dart';
 
 const _blue = Color(0xFF0072DC);
 const _ink = Color(0xFF222222);
+const _invalidAmount =
+    'Invalid amount. Enter a whole number from Rs. 1 to Rs. 1,000,000.';
 
 class TopUpScreen extends StatefulWidget {
   const TopUpScreen({
@@ -23,9 +25,11 @@ class TopUpScreen extends StatefulWidget {
   State<TopUpScreen> createState() => _TopUpScreenState();
 }
 
-class _TopUpScreenState extends State<TopUpScreen> {
+class _TopUpScreenState extends State<TopUpScreen>
+    with SingleTickerProviderStateMixin {
   final _amount = TextEditingController();
   late final TopUpService _service;
+  late final AnimationController _loadingAnimation;
   TopUp? _selected;
   bool _busy = false;
   String? _error;
@@ -34,29 +38,53 @@ class _TopUpScreenState extends State<TopUpScreen> {
   void initState() {
     super.initState();
     _service = widget.service ?? ApiTopUpService();
+    _loadingAnimation = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1600),
+    );
   }
 
   @override
   void dispose() {
+    _loadingAnimation.dispose();
     _amount.dispose();
     super.dispose();
   }
 
-  String _message(Object error) => error is ApiException
-      ? error.message
-      : 'Could not connect. Check your connection and try again.';
+  String _message(Object error) {
+    if (error is StateError &&
+        error.message == 'No authenticated Firebase user') {
+      return 'Please sign in again to top up.';
+    }
+    if (error is ApiException) {
+      if (error.statusCode == 401) return 'Please sign in again to top up.';
+      if (error.statusCode == 403) {
+        if (error.message == 'Email verification is required.') {
+          return 'Please verify your email before topping up.';
+        }
+        return 'Your account can’t make a top-up right now. Please contact support.';
+      }
+      if (error.statusCode == 400) return _invalidAmount;
+    }
+    return 'We couldn’t confirm if your top-up started. Check Top-up history before trying again.';
+  }
 
   Future<void> _openUrl(String? value) async {
     final uri = value == null ? null : Uri.tryParse(value);
     if (uri == null || uri.scheme != 'https' || uri.host.isEmpty) {
-      setState(() => _error = 'The checkout link is unavailable.');
+      setState(
+        () => _error =
+            'Couldn’t open checkout. Check Top-up history before trying again.',
+      );
       return;
     }
     try {
       if (widget.openCheckout != null) {
         final opened = await widget.openCheckout!(uri);
         if (!opened && mounted) {
-          setState(() => _error = 'Could not open checkout. Try again.');
+          setState(
+            () => _error = 'Couldn’t open checkout. Check Top-up history before trying again.',
+          );
         }
         return;
       }
@@ -81,7 +109,9 @@ class _TopUpScreenState extends State<TopUpScreen> {
       }
     } catch (_) {
       if (mounted) {
-        setState(() => _error = 'Could not open checkout. Try again.');
+        setState(
+          () => _error = 'Couldn’t open checkout. Check Top-up history before trying again.',
+        );
       }
     }
   }
@@ -89,15 +119,14 @@ class _TopUpScreenState extends State<TopUpScreen> {
   Future<void> _start() async {
     final amount = int.tryParse(_amount.text.trim());
     if (amount == null || amount < 1 || amount > 1000000) {
-      setState(
-        () => _error = 'Enter a whole amount from Rs. 1 to Rs. 1,000,000.',
-      );
+      setState(() => _error = _invalidAmount);
       return;
     }
     setState(() {
       _busy = true;
       _error = null;
     });
+    _loadingAnimation.repeat();
     try {
       final result = await _service.create(amount);
       if (!mounted) return;
@@ -113,7 +142,11 @@ class _TopUpScreenState extends State<TopUpScreen> {
         });
       }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        _loadingAnimation.stop();
+        _loadingAnimation.reset();
+        setState(() => _busy = false);
+      }
     }
   }
 
@@ -186,6 +219,10 @@ class _TopUpScreenState extends State<TopUpScreen> {
                   const SizedBox(height: 8),
                   TextField(
                     controller: _amount,
+                    onChanged: (_) {
+                      if (_error == _invalidAmount)
+                        setState(() => _error = null);
+                    },
                     keyboardType: TextInputType.number,
                     inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                     style: const TextStyle(fontSize: 20, color: _ink),
@@ -226,13 +263,57 @@ class _TopUpScreenState extends State<TopUpScreen> {
                   onPressed: _busy ? null : _start,
                   style: FilledButton.styleFrom(
                     backgroundColor: _blue,
+                    disabledBackgroundColor: const Color(0xFF005DB8),
+                    disabledForegroundColor: Colors.white,
+                    padding: EdgeInsets.zero,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
                     ),
                   ),
-                  child: Text(
-                    _busy ? 'Starting checkout...' : 'Continue to Rupio',
-                    style: const TextStyle(fontSize: 18),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        if (_busy)
+                          AnimatedBuilder(
+                            animation: _loadingAnimation,
+                            builder: (context, child) => Align(
+                              alignment: Alignment.centerLeft,
+                              child: FractionallySizedBox(
+                                widthFactor: _loadingAnimation.value,
+                                heightFactor: 1,
+                                child: child,
+                              ),
+                            ),
+                            child: const ColoredBox(color: Color(0x6627BAFF)),
+                          ),
+                        Center(
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (_busy) ...[
+                                const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                              ],
+                              Text(
+                                _busy
+                                    ? 'Starting checkout...'
+                                    : 'Continue to Rupio',
+                                style: const TextStyle(fontSize: 18),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),

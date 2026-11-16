@@ -49,3 +49,10 @@ app.*.map.json
 
 
 android/build/
+
+# Release signing material must never be committed, regardless of location.
+**/key.properties
+*.jks
+*.keystore
+*.p12
+*.pfx

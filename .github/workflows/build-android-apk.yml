@@ -1,0 +1,142 @@
+name: Build signed Android APK
+
+on:
+  # The initial build runs on merge into development, even while main is default.
+  push:
+    branches: [development]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signed-android-apk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # Never sign main, feature branches, or untrusted pull request code.
+    if: github.ref == 'refs/heads/development' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      VPAY_API_BASE_URL: https://v-pay-backend.onrender.com
+      ANDROID_BUILD_TOOLS: '36.0.0'
+    steps:
+      - name: Check out development
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter stable
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.4'
+          cache: true
+
+      - name: Install Android build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;$ANDROID_BUILD_TOOLS" "ndk;28.2.13676358"
+
+      - name: Get dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test --dart-define=VPAY_API_BASE_URL=https://v-pay-backend.onrender.com
+
+      - name: Sign, build, and verify release APK
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/vpay-release.keystore
+        run: |
+          set -euo pipefail
+          umask 077
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing required GitHub Actions secret: $name"
+              exit 1
+            fi
+          done
+
+          trap 'rm -f "$ANDROID_KEYSTORE_PATH" "$RUNNER_TEMP/vpay-release-cert.der"' EXIT
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+          test -s "$ANDROID_KEYSTORE_PATH"
+          unset ANDROID_KEYSTORE_BASE64
+
+          # Passwords are read from the environment, never passed on the command line.
+          if ! keytool -exportcert -keystore "$ANDROID_KEYSTORE_PATH" \
+            -storepass:env ANDROID_KEYSTORE_PASSWORD -alias "$ANDROID_KEY_ALIAS" \
+            -file "$RUNNER_TEMP/vpay-release-cert.der" > /dev/null 2>&1; then
+            echo '::error::Cannot read the release certificate. Check the keystore, store password, and alias secrets.'
+            exit 1
+          fi
+          subject="$(openssl x509 -inform DER -in "$RUNNER_TEMP/vpay-release-cert.der" -noout -subject)"
+          if grep -qi 'Android Debug' <<< "$subject"; then
+            echo '::error::The configured keystore contains an Android debug certificate.'
+            exit 1
+          fi
+          expected_sha256="$(sha256sum "$RUNNER_TEMP/vpay-release-cert.der" | cut -d ' ' -f 1)"
+
+          flutter build apk --release --dart-define=VPAY_API_BASE_URL=https://v-pay-backend.onrender.com
+
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          test -s "$apk"
+          signature="$("$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS/apksigner" verify --verbose --print-certs "$apk")"
+          actual_sha256="$(sed -n 's/^Signer #[0-9]* certificate SHA-256 digest: //p' <<< "$signature" | tr '[:upper:]' '[:lower:]')"
+          if [[ "$actual_sha256" != "$expected_sha256" ]]; then
+            echo '::error::APK signer does not match the configured release keystore.'
+            exit 1
+          fi
+          if grep -qi 'Android Debug' <<< "$signature"; then
+            echo '::error::APK uses an Android debug signing certificate.'
+            exit 1
+          fi
+          analyzer="$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer"
+          test "$("$analyzer" manifest application-id "$apk")" = 'com.vpay.vpay_mobile'
+          test "$("$analyzer" manifest debuggable "$apk")" = 'false'
+
+          # Confirm the release variant and the actual URL embedded in each Dart AOT library.
+          python3 - <<'PY'
+          import json
+          import os
+          import zipfile
+
+          with open('build/app/outputs/apk/release/output-metadata.json') as metadata:
+              assert json.load(metadata)['variantName'] == 'release', 'Unexpected build variant'
+          with zipfile.ZipFile('build/app/outputs/flutter-apk/app-release.apk') as apk:
+              libraries = [name for name in apk.namelist() if name.endswith('/libapp.so')]
+              assert libraries, 'Missing Dart release AOT libraries'
+              for name in libraries:
+                  assert os.environ['VPAY_API_BASE_URL'].encode() in apk.read(name), f'Render URL missing from {name}'
+          PY
+          echo 'Verified release APK: com.vpay.vpay_mobile, configured release signer, Render backend.'
+
+      - name: Remove temporary signing files
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/vpay-release.keystore" "$RUNNER_TEMP/vpay-release-cert.der"
+
+      - name: Upload signed APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: VPay-v1-Signed-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

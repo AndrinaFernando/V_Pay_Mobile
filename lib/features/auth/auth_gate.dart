@@ -4,12 +4,14 @@ import 'package:flutter/material.dart';
 import 'auth_service.dart';
 import 'screens/login_screen.dart';
 import 'screens/verify_email_screen.dart';
+import 'services/user_api_service.dart';
 import 'vpay_account_gate.dart';
 
 class AuthGate extends StatefulWidget {
-  const AuthGate({super.key, this.authService});
+  const AuthGate({super.key, this.authService, this.userApiService});
 
   final AuthService? authService;
+  final UserApiService? userApiService;
 
   @override
   State<AuthGate> createState() => _AuthGateState();
@@ -55,6 +57,7 @@ class _AuthGateState extends State<AuthGate> {
         return VPayAccountGate(
           key: ValueKey(user.uid),
           authService: _authService,
+          userApiService: widget.userApiService,
         );
       },
     );

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
 import '../../../core/network/api_exception.dart';
+import '../models/payment_amount_limits.dart';
 import '../models/merchant_payment_intent.dart';
 import '../services/payment_intent_service.dart';
 import '../widgets/merchant_brand_logo.dart';
@@ -20,9 +21,14 @@ const _electric = Color(0xFF0072DC);
 const _fieldFill = Color(0xFFF7F7F7);
 
 class CreatePaymentRequestScreen extends StatefulWidget {
-  const CreatePaymentRequestScreen({super.key, this.paymentIntentService});
+  const CreatePaymentRequestScreen({
+    super.key,
+    this.paymentIntentService,
+    this.amountLimits = PaymentAmountLimits.lkrDefault,
+  });
 
   final PaymentIntentService? paymentIntentService;
+  final PaymentAmountLimits amountLimits;
 
   @override
   State<CreatePaymentRequestScreen> createState() =>
@@ -59,7 +65,7 @@ class _CreatePaymentRequestScreenState
     final amount = value?.trim() ?? '';
     if (amount.isEmpty) return 'Enter an amount.';
     if (amount.startsWith('-')) {
-      return 'Amount must be greater than LKR 0.00.';
+      return 'Enter an amount within ${widget.amountLimits.displayRange}.';
     }
     if (!_amountPattern.hasMatch(amount)) {
       return 'Enter a valid amount with up to two decimal places.';
@@ -67,7 +73,9 @@ class _CreatePaymentRequestScreenState
 
     final amountMinor = parseLkrAmountToMinorUnits(amount);
     if (amountMinor == null) return 'That amount is too large.';
-    if (amountMinor <= 0) return 'Amount must be greater than LKR 0.00.';
+    if (!widget.amountLimits.accepts(amountMinor)) {
+      return 'Enter an amount within ${widget.amountLimits.displayRange}.';
+    }
     return null;
   }
 
@@ -75,7 +83,9 @@ class _CreatePaymentRequestScreenState
     if (_isSubmitting || !(_formKey.currentState?.validate() ?? false)) return;
 
     final amountMinor = parseLkrAmountToMinorUnits(_amountController.text);
-    if (amountMinor == null || amountMinor <= 0) return;
+    if (amountMinor == null || !widget.amountLimits.accepts(amountMinor)) {
+      return;
+    }
 
     setState(() {
       _isSubmitting = true;
@@ -256,6 +266,11 @@ class _CreatePaymentRequestScreenState
             fontSize: 14,
             fontWeight: FontWeight.w600,
           ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Allowed range: ${widget.amountLimits.displayRange}',
+          style: const TextStyle(color: _secondary, fontSize: 12),
         ),
         const SizedBox(height: 8),
         TextFormField(

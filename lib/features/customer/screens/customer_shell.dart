@@ -1,10 +1,17 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/security/local_auth_service.dart';
 import '../../auth/auth_service.dart';
 import '../../auth/models/vpay_user_profile.dart';
+import '../../card/services/card_api_service.dart';
+import '../../customer_payment/models/customer_payment_result.dart';
 import '../../customer_payment/screens/customer_payment_preview_screen.dart';
 import '../../customer_payment/screens/customer_qr_scanner_screen.dart';
+import '../../customer_payment/services/customer_payment_confirmation_service.dart';
 import '../../customer_payment/services/customer_payment_preview_service.dart';
+import '../models/customer_transaction.dart';
+import '../services/customer_transaction_service.dart';
+import 'customer_activity_screen.dart';
 import 'customer_home_screen.dart';
 
 const _electric = Color(0xFF0072DC);
@@ -18,29 +25,75 @@ class CustomerShell extends StatefulWidget {
     required this.authService,
     this.qrScannerBuilder,
     this.paymentPreviewService,
+    this.paymentConfirmationService,
+    this.localAuthService,
+    this.cardApiService,
+    this.transactionService,
   });
 
   final VPayUserProfile profile;
   final AuthService authService;
   final CustomerQrScannerViewBuilder? qrScannerBuilder;
   final CustomerPaymentPreviewService? paymentPreviewService;
+  final CustomerPaymentConfirmationService? paymentConfirmationService;
+  final LocalAuthService? localAuthService;
+  final CardApiService? cardApiService;
+  final CustomerTransactionService? transactionService;
 
   @override
   State<CustomerShell> createState() => _CustomerShellState();
 }
 
 class _CustomerShellState extends State<CustomerShell> {
-  late final Widget _home;
   int _selectedIndex = 0;
+  int _balanceRefreshTrigger = 0;
   bool _isSigningOut = false;
+  late final CustomerTransactionService _transactionService;
+  late Future<List<CustomerTransaction>> _transactionsFuture;
+  Future<void>? _transactionRefresh;
 
   @override
   void initState() {
     super.initState();
-    _home = CustomerHomeScreen(
-      profile: widget.profile,
-      onScanAndPay: _openQrScanner,
-    );
+    _transactionService =
+        widget.transactionService ?? ApiCustomerTransactionService();
+    _transactionsFuture = _transactionService.getTransactions();
+    _trackTransactionRequest(_transactionsFuture);
+  }
+
+  void _handlePaymentSuccess(CustomerPaymentResult _) {
+    setState(() => _balanceRefreshTrigger++);
+    _refreshTransactions();
+  }
+
+  Future<void> _refreshTransactions() {
+    final activeRefresh = _transactionRefresh;
+    if (activeRefresh != null) return activeRefresh;
+
+    final nextFuture = _transactionService.getTransactions();
+    setState(() {
+      _transactionsFuture = nextFuture;
+    });
+    return _trackTransactionRequest(nextFuture);
+  }
+
+  Future<void> _trackTransactionRequest(
+    Future<List<CustomerTransaction>> request,
+  ) {
+    final tracked = request.then<void>((_) {}, onError: (_) {});
+    _transactionRefresh = tracked;
+    tracked.whenComplete(() {
+      if (identical(_transactionRefresh, tracked)) {
+        _transactionRefresh = null;
+      }
+    });
+    return tracked;
+  }
+
+  void _selectTab(int index) {
+    final isEnteringActivity = index == 2 && _selectedIndex != 2;
+    setState(() => _selectedIndex = index);
+    if (isEnteringActivity) _refreshTransactions();
   }
 
   Future<void> _signOut() async {
@@ -78,6 +131,10 @@ class _CustomerShellState extends State<CustomerShell> {
         builder: (context) => CustomerPaymentPreviewScreen(
           paymentReference: paymentReference,
           previewService: widget.paymentPreviewService,
+          confirmationService: widget.paymentConfirmationService,
+          localAuthService: widget.localAuthService,
+          cardApiService: widget.cardApiService,
+          onPaymentSuccess: _handlePaymentSuccess,
         ),
       ),
     );
@@ -92,11 +149,18 @@ class _CustomerShellState extends State<CustomerShell> {
         child: IndexedStack(
           index: _selectedIndex,
           children: [
-            _home,
+            CustomerHomeScreen(
+              profile: widget.profile,
+              cardApiService: widget.cardApiService,
+              onScanAndPay: _openQrScanner,
+              balanceRefreshTrigger: _balanceRefreshTrigger,
+              transactionsFuture: _transactionsFuture,
+              onRefreshTransactions: _refreshTransactions,
+            ),
             _ScanAndPayTab(onScan: _openQrScanner),
-            const _ComingSoonTab(
-              icon: Icons.receipt_long_outlined,
-              title: 'Activity',
+            CustomerActivityScreen(
+              transactionsFuture: _transactionsFuture,
+              onRefresh: _refreshTransactions,
             ),
             _ComingSoonTab(
               icon: Icons.person_outline_rounded,
@@ -116,7 +180,7 @@ class _CustomerShellState extends State<CustomerShell> {
         ),
         child: BottomNavigationBar(
           currentIndex: _selectedIndex,
-          onTap: (index) => setState(() => _selectedIndex = index),
+          onTap: _selectTab,
           type: BottomNavigationBarType.fixed,
           backgroundColor: Colors.white,
           elevation: 0,

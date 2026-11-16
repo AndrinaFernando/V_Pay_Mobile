@@ -143,7 +143,7 @@ void main() {
   });
 
   test(
-    'maps authentication, unknown-reference and invalid responses',
+    'distinguishes authentication from account eligibility responses',
     () async {
       Future<CustomerPaymentPreviewException> errorFor(
         http.Response response,
@@ -163,13 +163,101 @@ void main() {
         CustomerPaymentPreviewFailure.authentication,
       );
       expect(
-        (await errorFor(http.Response('{}', 404))).failure,
-        CustomerPaymentPreviewFailure.unknownReference,
+        (await errorFor(
+          http.Response(
+            jsonEncode({
+              'success': false,
+              'message': 'Email verification is required',
+            }),
+            403,
+          ),
+        )).failure,
+        CustomerPaymentPreviewFailure.accountNotReady,
       );
       expect(
-        (await errorFor(http.Response('{"success":true}', 200))).failure,
-        CustomerPaymentPreviewFailure.invalidResponse,
+        (await errorFor(
+          http.Response(
+            jsonEncode({
+              'success': false,
+              'message':
+                  'Only active customer accounts can preview payment intents',
+            }),
+            403,
+          ),
+        )).failure,
+        CustomerPaymentPreviewFailure.accountNotReady,
       );
     },
   );
+
+  test('distinguishes coded and legacy not-found responses', () async {
+    Future<CustomerPaymentPreviewException> errorFor(
+      http.Response response,
+    ) async {
+      final apiClient = _FakeApiClient((_) async => response);
+      final service = ApiCustomerPaymentPreviewService(apiClient: apiClient);
+      try {
+        await service.getPreview('payment-ref');
+        fail('Expected preview lookup to fail');
+      } on CustomerPaymentPreviewException catch (error) {
+        return error;
+      }
+    }
+
+    expect(
+      (await errorFor(
+        http.Response(
+          jsonEncode({
+            'success': false,
+            'code': 'CUSTOMER_PROFILE_NOT_FOUND',
+            'message': 'VPay user profile not found',
+          }),
+          404,
+        ),
+      )).failure,
+      CustomerPaymentPreviewFailure.customerProfileNotFound,
+    );
+    expect(
+      (await errorFor(
+        http.Response(
+          jsonEncode({
+            'success': false,
+            'code': 'PAYMENT_INTENT_NOT_FOUND',
+            'message': 'Payment intent not found',
+          }),
+          404,
+        ),
+      )).failure,
+      CustomerPaymentPreviewFailure.unknownReference,
+    );
+    for (final body in [
+      '{}',
+      'not-json',
+      '{"code":42}',
+      '{"error":{"code":"CUSTOMER_PROFILE_NOT_FOUND"}}',
+    ]) {
+      expect(
+        (await errorFor(http.Response(body, 404))).failure,
+        CustomerPaymentPreviewFailure.unknownReference,
+      );
+    }
+  });
+
+  test('maps invalid successful responses', () async {
+    final apiClient = _FakeApiClient(
+      (_) async => http.Response('{"success":true}', 200),
+    );
+    final service = ApiCustomerPaymentPreviewService(apiClient: apiClient);
+
+    expect(
+      () => service.getPreview('payment-ref'),
+      throwsA(
+        isA<CustomerPaymentPreviewException>().having(
+          (error) => error.failure,
+          'failure',
+          CustomerPaymentPreviewFailure.invalidResponse,
+        ),
+      ),
+    );
+  });
 }

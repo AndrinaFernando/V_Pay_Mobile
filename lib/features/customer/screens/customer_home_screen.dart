@@ -9,6 +9,8 @@ import '../../auth/models/vpay_user_profile.dart';
 import '../../card/models/vpay_card.dart';
 import '../../card/services/card_api_service.dart';
 import '../../topup/screens/topup_screen.dart';
+import '../models/customer_transaction.dart';
+import '../widgets/customer_transaction_tile.dart';
 
 const _electric = Color(0xFF0072DC);
 const _strongBlue = Color(0xFF01397C);
@@ -26,11 +28,17 @@ class CustomerHomeScreen extends StatefulWidget {
     required this.profile,
     this.cardApiService,
     this.onScanAndPay,
+    this.balanceRefreshTrigger = 0,
+    this.transactionsFuture,
+    this.onRefreshTransactions,
   });
 
   final VPayUserProfile profile;
   final CardApiService? cardApiService;
   final VoidCallback? onScanAndPay;
+  final int balanceRefreshTrigger;
+  final Future<List<CustomerTransaction>>? transactionsFuture;
+  final Future<void> Function()? onRefreshTransactions;
 
   @override
   State<CustomerHomeScreen> createState() => _CustomerHomeScreenState();
@@ -39,12 +47,29 @@ class CustomerHomeScreen extends StatefulWidget {
 class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
   late final CardApiService _cardApiService;
   late Future<VPayCard> _cardFuture;
+  late Future<List<CustomerTransaction>> _transactionsFuture;
 
   @override
   void initState() {
     super.initState();
     _cardApiService = widget.cardApiService ?? CardApiService();
     _cardFuture = _cardApiService.getCurrentUserCard();
+    _transactionsFuture =
+        widget.transactionsFuture ??
+        Future.value(const <CustomerTransaction>[]);
+  }
+
+  @override
+  void didUpdateWidget(covariant CustomerHomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.balanceRefreshTrigger != oldWidget.balanceRefreshTrigger) {
+      _cardFuture = _cardApiService.getCurrentUserCard();
+    }
+    if (!identical(widget.transactionsFuture, oldWidget.transactionsFuture)) {
+      _transactionsFuture =
+          widget.transactionsFuture ??
+          Future.value(const <CustomerTransaction>[]);
+    }
   }
 
   void _retry() {
@@ -60,9 +85,14 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
   }
 
   Future<void> _openTopUp() async {
-    await Navigator.of(context)
-        .push(MaterialPageRoute<void>(builder: (_) => const TopUpScreen()));
-    if (mounted) _retry();
+    final result = await Navigator.of(context)
+        .push(MaterialPageRoute<String>(builder: (_) => const TopUpScreen()));
+    if (!mounted) return;
+    _retry();
+    if (result != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(result)));
+    }
   }
 
   String get _firstName {
@@ -270,27 +300,96 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
           ),
         ),
         const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 28),
-          decoration: BoxDecoration(
-            color: _surface,
-            borderRadius: BorderRadius.circular(18),
-          ),
-          child: const Column(
-            children: [
-              Icon(Icons.receipt_long_outlined, color: _secondary, size: 32),
-              SizedBox(height: 10),
-              Text(
-                'No recent activity yet',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: _supporting,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
+        FutureBuilder<List<CustomerTransaction>>(
+          future: _transactionsFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const _RecentActivityMessage(
+                child: SizedBox.square(
+                  dimension: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    color: _electric,
+                  ),
                 ),
+              );
+            }
+
+            if (snapshot.hasError) {
+              return _RecentActivityMessage(
+                child: Column(
+                  children: [
+                    const Icon(
+                      Icons.cloud_off_outlined,
+                      color: _secondary,
+                      size: 30,
+                    ),
+                    const SizedBox(height: 9),
+                    const Text(
+                      'Unable to load recent activity',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: _supporting,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (widget.onRefreshTransactions != null) ...[
+                      const SizedBox(height: 8),
+                      TextButton(
+                        key: const ValueKey('retryHomeActivityButton'),
+                        onPressed: widget.onRefreshTransactions,
+                        child: const Text('Retry'),
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            }
+
+            final transactions = snapshot.data ?? const [];
+            if (transactions.isEmpty) {
+              return const _RecentActivityMessage(
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.receipt_long_outlined,
+                      color: _secondary,
+                      size: 32,
+                    ),
+                    SizedBox(height: 10),
+                    Text(
+                      'No recent activity yet',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: _supporting,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            final recent = transactions.take(3).toList(growable: false);
+            return Container(
+              decoration: BoxDecoration(
+                color: _surface,
+                borderRadius: BorderRadius.circular(18),
               ),
-            ],
-          ),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                children: [
+                  for (final transaction in recent)
+                    CustomerTransactionTile(
+                      transaction: transaction,
+                      compact: true,
+                    ),
+                ],
+              ),
+            );
+          },
         ),
       ],
     );
@@ -317,6 +416,25 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
     }
 
     return 'Something went wrong while loading your VPay card.';
+  }
+}
+
+class _RecentActivityMessage extends StatelessWidget {
+  const _RecentActivityMessage({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 28),
+      decoration: BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: child,
+    );
   }
 }
 

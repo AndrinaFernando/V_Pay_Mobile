@@ -1,106 +1,50 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/network/api_exception.dart';
 import '../services/topup_service.dart';
+import 'rupio_checkout_screen.dart';
+import 'topup_history_screen.dart';
 
 const _blue = Color(0xFF0072DC);
 const _ink = Color(0xFF222222);
 
 class TopUpScreen extends StatefulWidget {
-  const TopUpScreen({super.key, this.service, this.openCheckout});
+  const TopUpScreen({
+    super.key,
+    this.service,
+    this.openCheckout,
+    this.checkoutBuilder,
+  });
   final TopUpService? service;
   final Future<bool> Function(Uri)? openCheckout;
+  final Widget Function(Uri, String, TopUpService)? checkoutBuilder;
   @override
   State<TopUpScreen> createState() => _TopUpScreenState();
 }
 
-class _TopUpScreenState extends State<TopUpScreen> with WidgetsBindingObserver {
+class _TopUpScreenState extends State<TopUpScreen> {
   final _amount = TextEditingController();
   late final TopUpService _service;
-  List<TopUp> _history = [];
   TopUp? _selected;
-  Timer? _timer;
   bool _busy = false;
-  bool _checking = false;
-  bool _loading = true;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     _service = widget.service ?? ApiTopUpService();
-    _loadHistory();
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _timer?.cancel();
     _amount.dispose();
     super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && _selected?.isPending == true)
-      _checkStatus();
   }
 
   String _message(Object error) => error is ApiException
       ? error.message
       : 'Could not connect. Check your connection and try again.';
-
-  Future<void> _loadHistory() async {
-    try {
-      final items = await _service.list();
-      if (!mounted) return;
-      setState(() {
-        _history = items;
-        _loading = false;
-        _selected ??= items.isEmpty ? null : items.first;
-      });
-      if (_selected?.isPending == true) _checkStatus();
-    } catch (error) {
-      if (mounted)
-        setState(() {
-          _loading = false;
-          _error = _message(error);
-        });
-    }
-  }
-
-  void _scheduleCheck() {
-    _timer?.cancel();
-    if (_selected?.isPending == true) {
-      _timer = Timer(const Duration(seconds: 10), _checkStatus);
-    }
-  }
-
-  Future<void> _checkStatus() async {
-    final id = _selected?.id;
-    if (id == null || _checking) return;
-    _checking = true;
-    try {
-      final result = await _service.get(id);
-      if (!mounted || _selected?.id != id) return;
-      setState(() {
-        _selected = result;
-        _history = [result, ..._history.where((item) => item.id != result.id)];
-        _error = null;
-      });
-    } catch (error) {
-      if (mounted && _selected?.id == id)
-        setState(() => _error = _message(error));
-    } finally {
-      _checking = false;
-      if (mounted) _scheduleCheck();
-    }
-  }
 
   Future<void> _openUrl(String? value) async {
     final uri = value == null ? null : Uri.tryParse(value);
@@ -109,11 +53,31 @@ class _TopUpScreenState extends State<TopUpScreen> with WidgetsBindingObserver {
       return;
     }
     try {
-      final opened =
-          await (widget.openCheckout?.call(uri) ??
-              launchUrl(uri, mode: LaunchMode.externalApplication));
-      if (!opened && mounted)
-        setState(() => _error = 'Could not open checkout. Try again.');
+      if (widget.openCheckout != null) {
+        final opened = await widget.openCheckout!(uri);
+        if (!opened && mounted)
+          setState(() => _error = 'Could not open checkout. Try again.');
+        return;
+      }
+      final selected = _selected;
+      if (selected == null) return;
+      final result = await Navigator.of(context).push<TopUp>(
+        MaterialPageRoute(
+          builder: (_) =>
+              widget.checkoutBuilder?.call(uri, selected.id, _service) ??
+              RupioCheckoutScreen(
+                url: uri,
+                topUpId: selected.id,
+                service: _service,
+              ),
+        ),
+      );
+      if (!mounted) return;
+      if (result != null && !result.isPending) {
+        Navigator.of(context).pop(_status(result));
+      } else {
+        setState(() => _selected = null);
+      }
     } catch (_) {
       if (mounted)
         setState(() => _error = 'Could not open checkout. Try again.');
@@ -137,9 +101,7 @@ class _TopUpScreenState extends State<TopUpScreen> with WidgetsBindingObserver {
       if (!mounted) return;
       setState(() {
         _selected = result;
-        _history = [result, ..._history];
       });
-      _scheduleCheck();
       await _openUrl(result.checkoutUrl);
     } catch (error) {
       if (mounted) {
@@ -147,7 +109,6 @@ class _TopUpScreenState extends State<TopUpScreen> with WidgetsBindingObserver {
           _error = _message(error);
           _selected = null;
         });
-        await _loadHistory();
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -164,139 +125,116 @@ class _TopUpScreenState extends State<TopUpScreen> with WidgetsBindingObserver {
     _ => 'Waiting for payment confirmation',
   };
 
+  Future<void> _showHistory() async {
+    final selected = await Navigator.of(context).push<TopUp>(
+      MaterialPageRoute(builder: (_) => TopUpHistoryScreen(service: _service)),
+    );
+    if (!mounted || selected == null) return;
+    setState(() {
+      _selected = selected;
+      _error = null;
+    });
+    await _openUrl(selected.checkoutUrl);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final item = _selected;
     return Scaffold(
-      appBar: AppBar(title: const Text('Top Up')),
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.white,
+        title: const Text(
+          'Top Up',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(6),
+          child: ColoredBox(
+            color: Color(0xFFF0F0F0),
+            child: SizedBox(height: 6, width: double.infinity),
+          ),
+        ),
+      ),
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(20),
+        child: Column(
           children: [
-            const Text(
-              'Add money to your VPay card',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w700,
-                color: _ink,
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Enter a whole amount in Sri Lankan rupees. Rupio will show a simulated checkout.',
-            ),
-            const SizedBox(height: 20),
-            TextField(
-              controller: _amount,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: const InputDecoration(
-                labelText: 'Amount (LKR)',
-                prefixText: 'Rs. ',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              height: 52,
-              child: FilledButton(
-                onPressed: _busy ? null : _start,
-                style: FilledButton.styleFrom(backgroundColor: _blue),
-                child: Text(
-                  _busy ? 'Starting checkout...' : 'Continue to Rupio',
-                ),
-              ),
-            ),
-            if (_error != null) ...[
-              const SizedBox(height: 14),
-              Text(_error!, style: const TextStyle(color: Colors.red)),
-            ],
-            if (item != null) ...[
-              const SizedBox(height: 24),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(18),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        _status(item),
-                        style: const TextStyle(
+                      const Text(
+                        'Amount',
+                        style: TextStyle(
                           fontSize: 18,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w600,
+                          color: _ink,
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      Text('Requested: Rs. ${item.requestedAmount}'),
-                      if (item.amount != null)
-                        Text('Final amount: Rs. ${item.amount}'),
-                      Text('Reference: ${item.id}'),
-                      if (item.message != null) ...[
-                        const SizedBox(height: 8),
-                        Text(item.message!),
-                      ],
-                      if (item.isPending) ...[
-                        const SizedBox(height: 8),
-                  const Text(
-                    'After checkout, return to VPay. Your balance changes only after VPay confirms the payment.',
-                  ),
-                        Wrap(
-                          spacing: 8,
-                          children: [
-                            TextButton(
-                              onPressed: _checkStatus,
-                              child: const Text('Check status'),
-                            ),
-                            if (item.checkoutUrl != null)
-                              TextButton(
-                                onPressed: () => _openUrl(item.checkoutUrl),
-                                child: const Text('Open checkout'),
-                              ),
-                          ],
-                        ),
-                      ],
+                      TextButton.icon(
+                        onPressed: _showHistory,
+                        icon: const Icon(Icons.history, size: 20),
+                        label: const Text('Top-up history'),
+                      ),
                     ],
                   ),
-                ),
-              ),
-            ],
-            const SizedBox(height: 24),
-            const Text(
-              'Top-up history',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-            ),
-            if (_loading)
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Center(child: CircularProgressIndicator()),
-              )
-            else if (_history.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: Text('No top-ups yet.'),
-              )
-            else
-              ..._history.map(
-                (entry) => ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(_status(entry)),
-                  subtitle: Text(
-                    'Rs. ${entry.amount ?? entry.requestedAmount} · ${entry.id}',
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _amount,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    style: const TextStyle(fontSize: 20, color: _ink),
+                    decoration: InputDecoration(
+                      hintText: 'Enter amount',
+                      prefixText: 'Rs. ',
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        borderSide: const BorderSide(color: _blue, width: 1.5),
+                      ),
+                    ),
                   ),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () {
-                    setState(() {
-                      _selected = entry;
-                      _error = null;
-                    });
-                    if (entry.isPending) {
-                      _checkStatus();
-                    } else {
-                      _timer?.cancel();
-                    }
-                  },
+                  const SizedBox(height: 10),
+                  const Text(
+                    'Add money to your VPay card in whole rupees.',
+                    style: TextStyle(color: Colors.black54),
+                  ),
+                  if (_error != null) ...[
+                    const SizedBox(height: 14),
+                    Text(_error!, style: const TextStyle(color: Colors.red)),
+                  ],
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+              child: SizedBox(
+                width: double.infinity,
+                height: 56,
+                child: FilledButton(
+                  onPressed: _busy ? null : _start,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _blue,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  child: Text(
+                    _busy ? 'Starting checkout...' : 'Continue to Rupio',
+                    style: const TextStyle(fontSize: 18),
+                  ),
                 ),
               ),
+            ),
           ],
         ),
       ),

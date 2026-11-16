@@ -9,9 +9,11 @@ import '../models/customer_payment_preview.dart';
 
 enum CustomerPaymentPreviewFailure {
   unknownReference,
+  customerProfileNotFound,
   expired,
   alreadyUsed,
   authentication,
+  accountNotReady,
   network,
   timeout,
   invalidResponse,
@@ -100,12 +102,28 @@ class ApiCustomerPaymentPreviewService
   }
 
   CustomerPaymentPreviewFailure _failureForResponse(int status, String body) {
-    final message = _responseMessage(body).toLowerCase();
+    final responseBody = _responseBody(body);
+    final message = switch (responseBody['message']) {
+      final String value => value.toLowerCase(),
+      _ => '',
+    };
+    final code = switch (responseBody['code']) {
+      final String value => value,
+      _ => '',
+    };
 
-    if (status == 401 || status == 403) {
+    if (status == 401) {
       return CustomerPaymentPreviewFailure.authentication;
     }
-    if (status == 404) return CustomerPaymentPreviewFailure.unknownReference;
+    if (status == 403) {
+      return CustomerPaymentPreviewFailure.accountNotReady;
+    }
+    if (status == 404) {
+      if (code == 'CUSTOMER_PROFILE_NOT_FOUND') {
+        return CustomerPaymentPreviewFailure.customerProfileNotFound;
+      }
+      return CustomerPaymentPreviewFailure.unknownReference;
+    }
     if (status == 408 || status == 504) {
       return CustomerPaymentPreviewFailure.timeout;
     }
@@ -121,15 +139,13 @@ class ApiCustomerPaymentPreviewService
     return CustomerPaymentPreviewFailure.unavailable;
   }
 
-  String _responseMessage(String body) {
+  Map<String, dynamic> _responseBody(String body) {
     try {
       final json = jsonDecode(body);
-      if (json is Map<String, dynamic> && json['message'] is String) {
-        return json['message'] as String;
-      }
+      if (json is Map<String, dynamic>) return json;
     } on FormatException {
       // The status code still provides a safe generic error classification.
     }
-    return '';
+    return const {};
   }
 }

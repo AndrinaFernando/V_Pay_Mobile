@@ -2,8 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../core/network/api_exception.dart';
 import '../../core/widgets/loading/vpay_loading.dart';
+import '../card/services/card_api_service.dart';
 import '../customer/screens/customer_shell.dart';
+import '../customer/services/customer_transaction_service.dart';
 import '../merchant/screens/merchant_dashboard_screen.dart';
+import '../merchant/services/merchant_balance_service.dart';
+import '../merchant/services/merchant_received_payments_service.dart';
 import 'app_access_gate.dart';
 import 'auth_service.dart';
 import 'models/user_profile_result.dart';
@@ -16,10 +20,18 @@ class VPayAccountGate extends StatefulWidget {
     super.key,
     required this.authService,
     this.userApiService,
+    this.cardApiService,
+    this.customerTransactionService,
+    this.merchantBalanceService,
+    this.merchantReceivedPaymentsService,
   });
 
   final AuthService authService;
   final UserApiService? userApiService;
+  final CardApiService? cardApiService;
+  final CustomerTransactionService? customerTransactionService;
+  final MerchantBalanceService? merchantBalanceService;
+  final MerchantReceivedPaymentsService? merchantReceivedPaymentsService;
 
   @override
   State<VPayAccountGate> createState() => _VPayAccountGateState();
@@ -69,12 +81,17 @@ class _VPayAccountGateState extends State<VPayAccountGate> {
                 profile: profile,
                 authService: widget.authService,
                 userApiService: _userApiService,
+                cardApiService: widget.cardApiService,
+                transactionService: widget.customerTransactionService,
               ),
               'MERCHANT' => MerchantDashboardScreen(
                 profile: profile,
                 authService: widget.authService,
                 loadProfile: _userApiService.getCurrentUserProfile,
                 userApiService: _userApiService,
+                merchantBalanceService: widget.merchantBalanceService,
+                merchantReceivedPaymentsService:
+                    widget.merchantReceivedPaymentsService,
               ),
               _ => AuthenticatedPlaceholderScreen(
                 authService: widget.authService,

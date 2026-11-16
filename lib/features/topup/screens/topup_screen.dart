@@ -58,8 +58,9 @@ class _TopUpScreenState extends State<TopUpScreen> {
     try {
       if (widget.openCheckout != null) {
         final opened = await widget.openCheckout!(uri);
-        if (!opened && mounted)
+        if (!opened && mounted) {
           setState(() => _error = 'Could not open checkout. Try again.');
+        }
         return;
       }
       final selected = _selected;
@@ -82,8 +83,9 @@ class _TopUpScreenState extends State<TopUpScreen> {
         setState(() => _selected = null);
       }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() => _error = 'Could not open checkout. Try again.');
+      }
     }
   }
 

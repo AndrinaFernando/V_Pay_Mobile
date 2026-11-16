@@ -1,6 +1,10 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../card/services/card_api_service.dart';
+import '../customer/services/customer_transaction_service.dart';
+import '../merchant/services/merchant_balance_service.dart';
+import '../merchant/services/merchant_received_payments_service.dart';
 import 'auth_service.dart';
 import 'screens/login_screen.dart';
 import 'screens/verify_email_screen.dart';
@@ -8,10 +12,22 @@ import 'services/user_api_service.dart';
 import 'vpay_account_gate.dart';
 
 class AuthGate extends StatefulWidget {
-  const AuthGate({super.key, this.authService, this.userApiService});
+  const AuthGate({
+    super.key,
+    this.authService,
+    this.userApiService,
+    this.cardApiService,
+    this.customerTransactionService,
+    this.merchantBalanceService,
+    this.merchantReceivedPaymentsService,
+  });
 
   final AuthService? authService;
   final UserApiService? userApiService;
+  final CardApiService? cardApiService;
+  final CustomerTransactionService? customerTransactionService;
+  final MerchantBalanceService? merchantBalanceService;
+  final MerchantReceivedPaymentsService? merchantReceivedPaymentsService;
 
   @override
   State<AuthGate> createState() => _AuthGateState();
@@ -58,6 +74,11 @@ class _AuthGateState extends State<AuthGate> {
           key: ValueKey(user.uid),
           authService: _authService,
           userApiService: widget.userApiService,
+          cardApiService: widget.cardApiService,
+          customerTransactionService: widget.customerTransactionService,
+          merchantBalanceService: widget.merchantBalanceService,
+          merchantReceivedPaymentsService:
+              widget.merchantReceivedPaymentsService,
         );
       },
     );

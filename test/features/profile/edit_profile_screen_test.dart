@@ -13,6 +13,8 @@ import 'package:vpay_mobile/features/profile/account_details_screen.dart';
 import 'package:vpay_mobile/features/profile/edit_profile_screen.dart';
 import 'package:vpay_mobile/features/profile/profile_screen.dart';
 
+import '../../support/fake_dashboard_services.dart';
+
 const customer = VPayUserProfile(
   uid: 'c1',
   name: 'Nimal Perera',
@@ -169,6 +171,8 @@ void main() {
             profile: customer,
             authService: FakeAuth(),
             userApiService: service,
+            cardApiService: FakeDashboardCardService(),
+            transactionService: FakeDashboardTransactionService(),
           ),
         ),
       );
@@ -275,6 +279,9 @@ void main() {
             authService: FakeAuth(),
             userApiService: service,
             loadProfile: () async => UserProfileResult.found(merchant),
+            merchantBalanceService: FakeDashboardMerchantBalanceService(),
+            merchantReceivedPaymentsService:
+                FakeDashboardReceivedPaymentsService(),
           ),
         ),
       );

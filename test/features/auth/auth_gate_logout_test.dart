@@ -13,6 +13,8 @@ import 'package:vpay_mobile/features/auth/services/user_api_service.dart';
 import 'package:vpay_mobile/features/merchant/screens/merchant_dashboard_screen.dart';
 import 'package:vpay_mobile/features/profile/profile_screen.dart';
 
+import '../../support/fake_dashboard_services.dart';
+
 class _FakeUser implements User {
   @override
   String get uid => 'merchant-uid';
@@ -90,6 +92,11 @@ void main() {
             home: AuthGate(
               authService: auth,
               userApiService: _FakeUserApiService(role: role),
+              cardApiService: FakeDashboardCardService(),
+              customerTransactionService: FakeDashboardTransactionService(),
+              merchantBalanceService: FakeDashboardMerchantBalanceService(),
+              merchantReceivedPaymentsService:
+                  FakeDashboardReceivedPaymentsService(),
             ),
           ),
         );
@@ -134,6 +141,11 @@ void main() {
         home: AuthGate(
           authService: auth,
           userApiService: _FakeUserApiService(),
+          cardApiService: FakeDashboardCardService(),
+          customerTransactionService: FakeDashboardTransactionService(),
+          merchantBalanceService: FakeDashboardMerchantBalanceService(),
+          merchantReceivedPaymentsService:
+              FakeDashboardReceivedPaymentsService(),
         ),
       ),
     );

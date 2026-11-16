@@ -25,12 +25,14 @@ class PaymentIntentQrScreen extends StatefulWidget {
     super.key,
     required this.paymentIntent,
     this.paymentIntentService,
+    this.onConfirmedSuccess,
     this.statusPollInterval = const Duration(seconds: 5),
     this.clock,
   });
 
   final MerchantPaymentIntent paymentIntent;
   final PaymentIntentService? paymentIntentService;
+  final Future<void> Function()? onConfirmedSuccess;
   final Duration statusPollInterval;
   final DateTime Function()? clock;
 
@@ -46,6 +48,7 @@ class _PaymentIntentQrScreenState extends State<PaymentIntentQrScreen> {
   Timer? _statusTimer;
   bool _isRefreshing = false;
   bool _expiryCheckStarted = false;
+  bool _successRefreshRequested = false;
   String? _refreshError;
 
   DateTime get _now => (widget.clock ?? DateTime.now)();
@@ -93,7 +96,7 @@ class _PaymentIntentQrScreenState extends State<PaymentIntentQrScreen> {
   }
 
   void _updateCountdown() {
-    if (!_isPending) return;
+    if (!mounted || !_isPending) return;
     final remaining = _timeRemaining();
     if (remaining == _remaining) return;
     setState(() => _remaining = remaining);
@@ -104,7 +107,7 @@ class _PaymentIntentQrScreenState extends State<PaymentIntentQrScreen> {
   }
 
   Future<void> _refreshStatus() async {
-    if (_isRefreshing || !_canRefreshStatus) return;
+    if (!mounted || _isRefreshing || !_canRefreshStatus) return;
     setState(() {
       _isRefreshing = true;
       _refreshError = null;
@@ -122,6 +125,9 @@ class _PaymentIntentQrScreenState extends State<PaymentIntentQrScreen> {
       }
       if (!mounted) return;
 
+      final justConfirmedSuccess =
+          _currentIntent.status != 'SUCCESS' && latest.status == 'SUCCESS';
+
       setState(() {
         _currentIntent = latest;
         _remaining = _timeRemaining();
@@ -131,6 +137,15 @@ class _PaymentIntentQrScreenState extends State<PaymentIntentQrScreen> {
       if (!_canRefreshStatus) {
         _statusTimer?.cancel();
         _clockTimer?.cancel();
+      }
+
+      if (justConfirmedSuccess && !_successRefreshRequested) {
+        _successRefreshRequested = true;
+        try {
+          await widget.onConfirmedSuccess?.call();
+        } catch (_) {
+          // A dashboard refresh failure must not change backend-confirmed status.
+        }
       }
     } catch (_) {
       if (mounted) {

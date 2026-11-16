@@ -23,10 +23,25 @@ final _card = VPayCard.fromJson({
   'createdAt': '2026-09-01T00:00:00.000Z',
 });
 
+final _refreshedCard = VPayCard.fromJson({
+  'id': 'customer-uid',
+  'maskedNumber': '•••• •••• •••• 4827',
+  'balance': 11750,
+  'status': 'FROZEN',
+  'expiresAt': '2029-09-01T00:00:00.000Z',
+  'createdAt': '2026-09-01T00:00:00.000Z',
+});
+
 class _FakeCardApiService extends CardApiService {
-  _FakeCardApiService({this.failFirst = false});
+  _FakeCardApiService({
+    this.failFirst = false,
+    this.failSecond = false,
+    List<VPayCard>? cards,
+  }) : _cards = cards == null ? null : List.of(cards);
 
   final bool failFirst;
+  final bool failSecond;
+  final List<VPayCard>? _cards;
   int requests = 0;
 
   @override
@@ -35,7 +50,11 @@ class _FakeCardApiService extends CardApiService {
     if (failFirst && requests == 1) {
       throw const ApiException(404, 'VPay virtual card not found');
     }
-    return _card;
+    if (failSecond && requests == 2) {
+      throw const ApiException(503, 'Card service unavailable');
+    }
+    final cards = _cards;
+    return cards == null ? _card : cards.removeAt(0);
   }
 }
 
@@ -108,5 +127,84 @@ void main() {
     expect(service.requests, 2);
     expect(find.text('Rs. 12,850.00'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('balance refresh trigger refetches the authoritative card', (
+    tester,
+  ) async {
+    final service = _FakeCardApiService(cards: [_card, _refreshedCard]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CustomerHomeScreen(
+            profile: _profile,
+            cardApiService: service,
+            balanceRefreshTrigger: 0,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(service.requests, 1);
+    expect(find.text('Rs. 12,850.00'), findsOneWidget);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CustomerHomeScreen(
+            profile: _profile,
+            cardApiService: service,
+            balanceRefreshTrigger: 1,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(service.requests, 2);
+    expect(find.text('Rs. 11,750.00'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('failed balance refresh uses the existing card error state', (
+    tester,
+  ) async {
+    final service = _FakeCardApiService(failSecond: true);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CustomerHomeScreen(
+            profile: _profile,
+            cardApiService: service,
+            balanceRefreshTrigger: 0,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Rs. 12,850.00'), findsOneWidget);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CustomerHomeScreen(
+            profile: _profile,
+            cardApiService: service,
+            balanceRefreshTrigger: 1,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(service.requests, 2);
+    expect(
+      find.text('Something went wrong while loading your VPay card.'),
+      findsOneWidget,
+    );
+    expect(find.text('Retry'), findsOneWidget);
   });
 }

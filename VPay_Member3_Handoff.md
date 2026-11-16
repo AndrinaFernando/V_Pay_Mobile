@@ -1,135 +1,158 @@
 # VPay Member 3 Implementation and Team Handoff
 
-**Purpose:** record what Member 3's current code implements, the API contract future work should reuse, and the remaining work needed to complete the app. This document describes the checked-out repositories; it does not claim that an unmerged branch is integrated into the team's shared branch.
+**Last reviewed:** 16 November 2026
+**Purpose:** explain Member 3's current implementation, remaining work and dependencies needed to finish and integrate the VPay application. This document distinguishes code present in the checked-out repositories from work another member still owns.
 
-## Repositories and current branch
+## Repository state
 
-- Flutter: `D:\V_Pay\V_Pay_Mobile`
+- Flutter mobile: `D:\V_Pay\V_Pay_Mobile`
 - Node.js/Express backend: `D:\V_Pay\V_Pay_Backend`
-- Current local branch observed in both repositories: `feature/merchant-qr`
-- The attached architecture and responsibility plan is dated **8 October 2026**. It names `development` as the shared integration branch and assigns the work described below. Treat the plan's proposed merchant-account schema as a proposal that still needs to be frozen with the team.
+- Current branch in both repositories: `integration/merchant-customer`
+- The attached **VPay Updated Architecture, Member Responsibilities and Timeline** is the project planning reference. Its responsibility assignments are planning guidance; the implementation status below is based on the current code.
+- The working trees contain uncommitted changes. This handoff does not mean those changes have been reviewed, committed, pushed or merged to another branch.
 
-## Member 3 scope in the updated team plan
+## Member 3 scope and status
 
-The plan assigns Member 3:
+| Responsibility | Current status | Notes |
+|---|---|---|
+| Merchant dashboard | **Implemented** | Uses authenticated profile data, VPay branding, balance card, Create action, recent received-payment area and merchant navigation. |
+| Merchant balance display | **Implemented** | Calls the authenticated read-only backend balance endpoint; no balance is hard-coded or changed by Flutter. |
+| Create Payment Request | **Implemented** | LKR amount entry, positive/range/precision validation, optional description, loading, duplicate-submit prevention and API errors. |
+| Payment-intent create/retrieve/expiry | **Implemented** | Backend verifies authentication and active merchant role, derives UID from the token, checks ownership on retrieval and enforces expiry server-side. |
+| Merchant QR | **Implemented** | Encodes the payment reference only and displays amount, reference, creation/expiry details and countdown. |
+| Pending/final status UI | **Implemented** | Polls while `PENDING` or `PROCESSING`; displays `SUCCESS`, `FAILED` and `EXPIRED` distinctly. Network errors remain uncertain. |
+| Refresh on confirmed success | **Implemented** | A backend-confirmed `SUCCESS` triggers one balance/history refresh; returning from QR does not issue a duplicate success refresh. |
+| Merchant received-payments UI/client | **Implemented, backend dependency pending** | Authenticated Flutter service, model, list UI, loading/empty/error/retry/refresh states are present. The backend endpoint is not present in the current backend routes. Member 5 owns it. |
+| Merchant Profile and Logout | **Implemented** | Reuses the shared account/profile and Firebase sign-out flow. This was added to the merchant UI scope beyond the original payment-flow assignment. |
+| Terminal tab | **Not part of current navigation** | The extra Terminal tab was removed; the navigation uses Dashboard, Create, Payments and Profile. Do not add another terminal page or duplicate QR/payment logic without a new team decision. |
 
-- Merchant dashboard and merchant balance display.
-- Enter-amount/payment-request UI and validation.
-- Payment-intent backend module, expiry, and status retrieval.
-- QR generation containing only the payment-intent reference or an approved deep link.
-- Pending-payment/status UI.
-- Received-payment list integration.
-- Displaying Member 4's backend-confirmed final result and updated merchant balance.
+**Member 3 completion assessment:** the assigned Flutter and backend payment-intent flow, balance display, profile/logout and received-payments client integration are implemented in this branch. The received-payment feature is not end-to-end until Member 5's backend history endpoint is available and the full cross-member flow is verified against the integrated backend. No separate Member 3 production-code feature is currently identified beyond that integration/verification work.
 
-The plan assigns actual QR payment execution, customer debit, merchant credit, and transaction-record creation to Member 4. It assigns shared transaction-history querying/presentation and notifications to Member 5. Flutter must not update customer or merchant balances.
+## Member 3 implementation map
 
-## Implemented by Member 3 in the current code
+### Flutter
 
-### Flutter merchant entry and dashboard
+- `lib/features/merchant/screens/merchant_dashboard_screen.dart` — merchant dashboard, balance and received-payment views, navigation, refresh coordination and success callback wiring.
+- `lib/features/merchant/screens/create_payment_request_screen.dart` — amount/description form, amount validation, duplicate-submit guard and payment-intent creation.
+- `lib/features/merchant/screens/payment_intent_qr_screen.dart` — QR presentation, countdown, polling, retryable network errors and final status UI.
+- `lib/features/merchant/models/merchant_payment_intent.dart` — payment-intent response model. `qrPayload` returns only `paymentReference`. A legacy `COMPLETED` response is normalized to the agreed `SUCCESS` UI status; keep this compatibility mapping documented until the team confirms old responses are no longer produced.
+- `lib/features/merchant/services/payment_intent_service.dart` — create, retrieve and list calls through the shared authenticated `ApiClient`.
+- `lib/features/merchant/models/merchant_balance.dart` and `lib/features/merchant/services/merchant_balance_service.dart` — LKR balance represented in integer minor units and fetched through the authenticated client.
+- `lib/features/merchant/models/merchant_received_payment.dart`, `lib/features/merchant/services/merchant_received_payments_service.dart` and `lib/features/merchant/widgets/merchant_received_payment_tile.dart` — received-payment response model, service and reusable row.
+- `lib/features/merchant/screens/merchant_profile_screen.dart` — merchant account/business profile display and logout UI.
+- `lib/features/auth/vpay_account_gate.dart` and `lib/features/auth/models/vpay_user_profile.dart` — shared account routing and merchant business profile data consumed by the merchant screens. Coordinate changes to these shared auth files with Member 1.
+- `lib/core/network/api_client.dart` — shared authenticated HTTP client; it attaches the Firebase ID token. Merchant services should continue using it instead of creating another client.
+- `lib/core/network/api_config.dart` — environment-configurable backend base URL; Android emulator development uses `10.0.2.2` with the configured local backend port. Deployment should use the deployment URL; do not alter Firebase project configuration for this feature.
 
-- [lib/features/auth/vpay_account_gate.dart](lib/features/auth/vpay_account_gate.dart) routes a `MERCHANT` profile to `MerchantDashboardScreen`; the customer routing branch remains present.
-- [lib/features/auth/models/vpay_user_profile.dart](lib/features/auth/models/vpay_user_profile.dart) parses optional `businessName` for the merchant dashboard.
-- [lib/features/merchant/screens/merchant_dashboard_screen.dart](lib/features/merchant/screens/merchant_dashboard_screen.dart) displays the merchant identity and Create Payment Request action.
-- The dashboard deliberately shows an unavailable balance message and an empty received-payments placeholder. It does not display a fabricated balance or payment history.
+### Backend
 
-### Create Payment Request and API integration
+- `src/app.js` mounts the modules below under `/api`.
+- `src/modules/payments/payment.routes.js` exposes payment-intent and customer payment routes.
+- `src/modules/payments/payment.controller.js`, `payment.validation.js` and `payment.service.js` implement request validation, authenticated controller responses, intent ownership/expiry and Member 4's separate customer payment execution code. Keep edits to payment execution, transfers and ledger writes with Member 4.
+- `src/modules/merchant/merchant.routes.js`, `merchant.controller.js` and `merchant.service.js` expose and implement the read-only merchant balance operation.
+- Backend Firebase Admin configuration and authentication middleware remain the source of truth. Do not expose credentials or add Flutter Firestore writes.
 
-- [lib/features/merchant/screens/create_payment_request_screen.dart](lib/features/merchant/screens/create_payment_request_screen.dart) validates positive LKR amounts with up to two decimal places, converts amounts to minor units, prevents duplicate submissions, shows loading/errors, and navigates only after a valid backend response.
-- [lib/features/merchant/services/payment_intent_service.dart](lib/features/merchant/services/payment_intent_service.dart) uses the existing shared `ApiClient` through an adapter. It does not create a second HTTP client or write Firestore data from Flutter.
-- Creation request: `POST /api/payment-intents` with `amountMinor`, `currency: "LKR"`, and optional `description`.
-- Retrieval request: `GET /api/payment-intents/:paymentReference`.
-- Both requests use the shared API client, which attaches the authenticated Firebase ID token as a Bearer token.
+## Current API and data contracts
 
-### QR and payment status
+### Payment intents
 
-- [lib/features/merchant/models/merchant_payment_intent.dart](lib/features/merchant/models/merchant_payment_intent.dart) represents the server response, including payment reference, amount, currency, status, creation/expiry timestamps, and optional description/paid time.
-- The QR payload is the `paymentReference` only. It contains no balance or credentials.
-- [lib/features/merchant/screens/payment_intent_qr_screen.dart](lib/features/merchant/screens/payment_intent_qr_screen.dart) shows the server-returned reference, amount, and expiry countdown. It polls authenticated backend status while `PENDING` or `PROCESSING`, stops on a final state or disposal, and does not infer success from a network failure.
-- The Flutter model currently maps legacy backend `COMPLETED` to the agreed display value `SUCCESS`. Keep this compatibility mapping only while the team needs it; agree on one canonical status vocabulary before removing it.
+The backend mounts these merchant intent paths (all under `/api`):
 
-### Backend payment intents
+| Method and path | Purpose | Access/behavior |
+|---|---|---|
+| `POST /api/payment-intents` | Create a payment intent | Firebase-authenticated, verified active merchant. UID comes from the verified token, not a client-supplied merchant ID. |
+| `GET /api/payment-intents/:paymentReference` | Retrieve an intent/status | Authenticated merchant owner only; server applies expiry rules. Response envelope is `{ success: true, data: { paymentIntent } }`. |
+| `GET /api/payment-intents?limit=...` | List a merchant's intents | Authenticated; bounded list limit. This is not a replacement for the transaction-history endpoint. |
 
-- [src/app.js](../V_Pay_Backend/src/app.js) mounts the payment routes.
-- [src/modules/payments/payment.routes.js](../V_Pay_Backend/src/modules/payments/payment.routes.js) defines the authenticated create and reference-retrieval routes.
-- [src/modules/payments/payment.controller.js](../V_Pay_Backend/src/modules/payments/payment.controller.js) checks email verification, validates request bodies, and returns success/error envelopes.
-- [src/modules/payments/payment.validation.js](../V_Pay_Backend/src/modules/payments/payment.validation.js) accepts positive safe-integer `amountMinor`, requires `LKR`, trims optional descriptions up to 200 characters, rejects unexpected fields, and validates `expiresInSeconds` from 60 to 86,400 seconds (default 900 seconds).
-- [src/modules/payments/payment.service.js](../V_Pay_Backend/src/modules/payments/payment.service.js) reuses Firebase Admin and Firestore. It derives the merchant UID from the verified Firebase ID token, requires an active `MERCHANT` profile, creates a unique Firestore document ID in `paymentIntents`, stores the intent, returns server-generated timestamps, checks merchant ownership on retrieval, and expires an overdue `PENDING` intent server-side.
-- The current status constants are `PENDING`, `PROCESSING`, `SUCCESS`, `FAILED`, and `EXPIRED`. Creation sets `PENDING`; the expiry check can change `PENDING` to `EXPIRED`. This Member 3 code does not execute a payment or write `SUCCESS`/`FAILED` outcomes.
+Create body currently accepts `amountMinor`, `currency: "LKR"`, optional `description`, and optional `expiresInSeconds`. The backend enforces integer minor units from **1000 through 10,000,000** (LKR 10.00 to LKR 100,000.00), LKR currency, description up to 200 characters, and expiry from 60 to 86,400 seconds (default 900 seconds). Flutter's default form uses the same LKR amount range and two-decimal entry rule.
 
-Current Firestore intent fields written on creation are:
+Create returns HTTP `201` with `{ success: true, data: { paymentIntent } }`; retrieval returns HTTP `200` with the same envelope. The public intent includes the generated `paymentReference`, merchant name, amount/currency, status, server timestamps and optional description. Errors use `{ success: false, message }` (payment execution errors may also include a stable `code`).
 
-| Field | Source / meaning |
-|---|---|
-| `merchantUid` | UID from the verified Firebase ID token |
-| `merchantName` | Merchant profile's `businessName` |
-| `amountMinor` | Validated amount in LKR minor units |
-| `currency` | `LKR` |
-| `status` | Starts as `PENDING` |
-| `createdAt` | Backend-generated time |
-| `expiresAt` | Backend-generated time plus the validated duration |
-| `description` | Optional trimmed merchant description |
+`paymentReference` is generated by the backend and identifies the Firestore `paymentIntents` document. The QR contains only that reference. Creation timestamps and expiry are server-generated. Current agreed statuses are `PENDING`, `PROCESSING`, `SUCCESS`, `FAILED`, and `EXPIRED`. The backend expires overdue pending intents. Member 4 owns customer confirmation, atomic customer debit/merchant credit, successful ledger writes and authoritative final payment results. Flutter never creates or changes financial records.
 
-`paymentReference` is the Firestore document ID, not a client-supplied field. `paidAt` is included in the public response if a later backend operation has stored it; Member 3 does not create that payment result.
+The separate `GET /api/payment-intents/:paymentReference/payment-status` route is part of the customer payment operations. Merchant status UI uses the merchant-owned intent retrieval route above, which returns the full owned intent.
 
-### Local Android emulator API URL
+### Merchant balance
 
-- [lib/core/network/api_config.dart](lib/core/network/api_config.dart) uses `VPAY_API_BASE_URL` as a compile-time override and defaults to `http://10.0.2.2:3000` for the Android emulator reaching the Windows host.
-- The debug Android manifest already allows internet access and local cleartext HTTP. No release cleartext permission was added.
-- Deployment should pass the real HTTPS backend URL with `--dart-define=VPAY_API_BASE_URL=...`.
+- `GET /api/merchant/balance`
+- Requires Firebase authentication, verified email, an active `MERCHANT` user and an active valid merchant wallet.
+- Identity is derived from the verified token. Backend reads `merchantAccounts/{uid}` and returns `{ success: true, data: { balanceMinor, currency: "LKR" } }`.
+- `balanceMinor` is a non-negative safe integer in LKR minor units. Missing/inactive/malformed wallets return errors; this read route never creates or changes a wallet.
+- Flutter formats this response for display and never writes to it.
 
-## Tests and verification recorded
+### Merchant received payments — Member 5 dependency
 
-Flutter tests include merchant dashboard/profile parsing, payment form validation/loading/duplicate-submit/error handling, API service request/response checks, QR/status rendering for all five statuses, expiry, network error handling, and a compact viewport QR check.
+The Flutter client is wired for the team's approved contract:
 
-Backend tests include authentication middleware, controller errors, input validation, merchant authorization, create/retrieve ownership, expiry, processing/success preservation, unknown/malformed references, and a fake Firestore assertion that creation writes only a payment-intent document and does not touch balances.
+- `GET /api/merchant/transactions?limit=20` (Flutter requests 50 for the dashboard list; the backend contract allows a maximum of 50).
+- Expected response: `{ success: true, data: { transactions: [...] } }`.
+- Each item: `transactionId`, `paymentReference`, `amountMinor`, `currency`, `status`, `createdAt`.
+- Only successful `QR_PAYMENT` records for the authenticated merchant, newest first, verified against successful payment intents; empty results return `[]`.
 
-Last recorded verification:
+**Current blocker:** this path does not exist in `src/modules/merchant/merchant.routes.js` or the current payment routes. Member 5 explicitly approved and took responsibility for implementing the endpoint, Firestore index and backend tests. Do not add a duplicate backend endpoint in Member 3's work. After Member 5 merges it, verify the response amount units, timestamp format, ownership filtering and index against the Flutter service/model.
 
-- `flutter analyze` — passed with no issues.
-- `flutter test` — 23 tests passed.
-- `npm test` in the backend — 20 tests passed.
+## Security and ownership rules for future contributors
 
-These tests use fakes/mocks. They do not prove live Firebase behavior or a complete Android-emulator payment execution flow.
+1. Derive customer/merchant UIDs from verified Firebase ID tokens on the backend. Do not trust UID or merchant ID values in request bodies or query strings.
+2. A merchant UI may display a final status only after the backend returns it. Network errors are unknown/temporary states, never evidence of success or failure.
+3. Do not debit/credit balances, write transactions, or mark a payment successful from Flutter.
+4. Keep payment-reference QR payload compatibility with the customer scanner. Do not put credentials, account balances or private profile data in the QR.
+5. Do not change Member 4's customer confirmation/atomic transfer path while working on Member 3 presentation or read APIs.
+6. Do not invent received-payment records, substitute customer card balance for merchant balance, or create a second source of financial truth.
 
-## Remaining work and handoffs
+## Other member work and handoffs
 
-### Member 3: remaining integration work
+The items below describe team ownership from the architecture/responsibility plan and current route evidence. Confirm progress with the owner before assuming an item is unfinished or changing shared code.
 
-1. **Merchant balance display:** the current dashboard is a placeholder. The updated plan proposes `merchantAccounts/{uid}` as the merchant account/balance document, but also says that proposal must be frozen before Member 4 relies on it. Agree with the team on fields, read authorization, and the backend balance-read contract. Then connect the dashboard through the shared authenticated API client. Never read a customer card balance for a merchant and never write balances from Flutter.
-2. **Received payments:** the dashboard's received-payments section remains a placeholder. Integrate it with Member 5's shared transaction-history querying/presentation after Member 4 and Member 2 write trustworthy records and Member 5 publishes the approved endpoint/model. Do not reconstruct payments from local UI state or fabricate successful rows.
-3. **Member 4 result refresh:** after Member 4 confirms payment atomically, retrieve the authoritative intent status and refresh the merchant account/history views through their agreed read APIs. Do not mark a payment successful locally.
-4. **Cross-member handoff:** keep the payment-intent reference, amount, merchant identity, status, expiry, and error semantics aligned with Member 4's customer scanner/payment contract.
+### Member 1 — shared authentication, profile and card functionality
 
-### Member 4: customer QR payment engine (per team plan)
+- Own Firebase email/password authentication, email verification/password reset, role onboarding/profile bootstrap, role routing/protected access, customer virtual-card creation/read and Customer Home.
+- Own card `ACTIVE`/`FROZEN` state, backend/UI freeze and unfreeze, and sensitive card-action confirmation through the existing device-authentication facade.
+- The current backend card routes expose authenticated `GET /api/card`; the route file does not expose freeze/unfreeze actions. Confirm those actions' status with Member 1 and keep the card-state contract stable for Member 4.
+- Coordinate changes to `vpay_account_gate.dart`, `vpay_user_profile.dart` and shared account screens. Preserve both `CUSTOMER` and `MERCHANT` routing, Firebase sign-out behavior and protected-route handling.
 
-- Build QR scanning and camera permission flow.
-- Resolve a scanned reference on the backend. The current `GET /api/payment-intents/:paymentReference` is merchant-only and checks the intent's `merchantUid`; it is not a customer lookup endpoint. Member 4 and the team must approve customer lookup authorization/response rules before adding or changing routes.
-- Validate customer, card status, merchant, amount, intent status/expiry, available customer funds, and duplicate/idempotency behavior on the backend.
-- Execute the authoritative atomic customer debit and merchant credit. Create the stable `QR_PAYMENT` transaction record as part of the operation, and set the final intent status and paid timestamp only after the transaction commits.
-- Return/retain authoritative status for timeout recovery. Flutter must check status instead of blindly retrying payment execution.
-- Notify Member 3 of the finalized merchant-balance read and status contracts.
+### Member 2 — customer top-up
 
-### Member 5: shared history and integration (per team plan)
+- The current backend contains authenticated top-up create/list/detail paths and a signed Rupio webhook in `src/modules/topups/topup.routes.js`; `topup.service.js` and `rupio.adapter.js` own provider processing. The plan calls the simulator MockPay, so confirm whether Rupio is the team's intended adapter/name or a temporary implementation.
+- Member 2 owns the separate hosted provider simulation, SUCCESS/DECLINED/TIMEOUT/CANCELLED outcomes, verified callback/idempotency, exactly-once customer credit, `TOP_UP` ledger record, and Flutter checkout/receipt flow. Verify integrated tests and provider configuration with Member 2; never use top-up code to alter merchant funds.
 
-- Own shared transaction model/formatting, merchant/customer history query/presentation, and the approved transaction-history API contract.
-- Integrate merchant received payments only after Member 2/Member 4 records exist. Do not fabricate missing financial records.
-- Coordinate shared error/response conventions, stable reference/logging consistency, FCM notifications, end-to-end integration, and regression/QA.
+### Member 4 — customer QR payment engine
 
-### Member 1 and Member 2: remaining work identified by the plan
+- The current payment routes include customer preview, confirmation and minimal payment-status operations; payment execution and atomic financial writes are in `src/modules/payments/payment.service.js`.
+- Own scanning/permission and customer confirmation UI, authoritative payment execution, idempotency/recovery behavior, customer debit, merchant credit, `QR_PAYMENT` transaction creation, and final `SUCCESS`/failure behavior.
+- Coordinate status/reference/amount and wallet semantics with Member 3. In particular, ensure status retrieval for the merchant reads the same final intent updated by confirmation, and success is not returned before the transaction commits.
 
-- **Member 1:** finish profile work and backend/UI card freeze/unfreeze with the stable `ACTIVE`/`FROZEN` contract used by Member 4. Coordinate the shared auth/profile files touched for merchant routing and `businessName` with Member 1.
-- **Member 2:** complete the separate MockPay/top-up flow, verify provider outcomes/callbacks, credit customer balance exactly once on verified success, and write the corresponding `TOP_UP` transaction record. Failed/cancelled/timed-out top-ups must not credit balances.
+### Member 5 — transaction history and notifications
 
-### Project-wide integration
+- Implement the approved merchant transaction-history endpoint, Firestore index and backend security/ownership tests. Member 3's Flutter UI already consumes the agreed response shape.
+- Own shared transaction history conventions/formatting and notification/integration work assigned by the project plan. Coordinate the final response timestamps/amount units and merge availability with Member 3.
 
-- Merge/rebase only through the team's approved branch/PR workflow. The plan names `development` as the shared branch; this workspace is currently on `feature/merchant-qr`.
-- After dependencies are merged, exercise the full flow on an Android emulator: merchant creates intent -> customer scans and confirms -> backend atomically applies payment -> merchant sees backend-confirmed final status, updated balance, and received transaction.
-- Keep the post-core MockBank, payout/settlement, refunds, partial refunds, and negative merchant balance work out of the mandatory core unless the project owner explicitly starts that extension phase.
+## Remaining actions for Member 3
 
-## Before committing this workspace
+1. **Wait for/coordinate Member 5's history endpoint.** Once available on the integration branch, run the Flutter history service/widget tests against its final response contract and perform an authenticated emulator check. Do not duplicate the backend endpoint.
+2. **Verify full end-to-end integration with Member 4.** On a test environment, merchant creates QR -> customer scans/confirms -> backend commits the payment -> merchant sees `SUCCESS` -> balance and history reload. Use test fixtures/test accounts; do not change production financial data.
+3. **Confirm the integrated branches and API URLs.** Verify both repositories point to the intended shared integration state and the Android emulator can reach the backend. Keep local/deployment configuration distinct and never commit secrets.
+4. **Regression-check role navigation and logout** after shared auth changes from Member 1. Customer behavior must remain intact.
 
-The working tree contains changes in two independent Git repositories. Review and commit each repository separately. In the Flutter repository, check whether the shared auth/profile changes are coordinated with Member 1, exclude the nearly empty untracked `package-lock.json` unless intentionally needed, and inspect generated platform registrant files that appear modified with line-ending warnings but no visible diff. Do not commit credentials or local `.env` files.
+No new payment engine, Terminal tab, Firestore model, package or endpoint is currently required from Member 3. If the product owners add merchant-specific terminal operations, agree on their distinct purpose and backend contract before implementation; the current Create, Payments and Profile flows already cover the merchant features described here.
 
-## Bottom line
+## Dependency order and future scope
 
-Member 3 has the authenticated payment-intent create/retrieve/expiry path and merchant create-request/QR/status path implemented. Member 3's overall plan is **not fully complete**: merchant balance display and received-payment integration await agreed backend read contracts and the Member 4/Member 5 authoritative balance/history work. The current branch is suitable to hand off for review as partial work, but should not be described as a completed end-to-end merchant payment feature.
+- **Shared baseline:** Member 1's verified auth, role/profile and card-read contracts underpin Members 2, 3 and 4. Member 2 and Member 3 can proceed in parallel once this baseline exists.
+- **Payment contract handoff:** Member 3 produces the intent reference, amount, merchant identity, expiry and status lookup contract; Member 4 consumes it. That contract is already implemented in this branch. Member 4's card-state handling also depends on Member 1's `ACTIVE`/`FROZEN` contract.
+- **History integration:** Members 2 and 4 write their own trustworthy `TOP_UP` and `QR_PAYMENT` records during the money-changing operation. Member 5 queries and presents those records; it must not recreate missing ledger entries. This is why the Member 3 received-payment UI can be ready while the endpoint remains pending.
+- **Integration/QA:** Member 5 coordinates common response/error conventions, notifications, logging/reference consistency, deployment and end-to-end/regression testing. The integration definition of done is a target-device flow with backend-authenticated APIs, success and failure cases, and no manual Firestore repair.
+- **Post-core only:** after the mandatory top-up and QR-payment flows are stable, a later approved extension may add a separate MockBank simulator (project owner/Member 1), settlement/refund UI (Member 3), authoritative refund and bounded negative-balance rules (Member 4), and settlement/refund history/notifications (Member 5). These are not Member 3's current unfinished core work and must not delay core integration.
+
+## Verification record
+
+Most recent Flutter verification for the payment-result integration:
+
+- `flutter test` — **PASS**: 130 passed, 1 skipped.
+- `flutter analyze` — no errors; 6 informational curly-brace style lints remain in top-up files.
+- Added/covered merchant tests include pending-to-success, processing-to-success, failed, expired, temporary network interruption/retry, dashboard balance/history refresh exactly once, and returning from the request flow.
+- Backend tests were **not rerun as part of that Flutter verification**. Run the backend repository's configured test command after Member 5's endpoint is merged; do not treat Flutter tests as proof of backend authorization or live Firebase behavior.
+
+## Final status
+
+Member 3's merchant create-request, payment-intent, QR, status, balance, profile/logout and Flutter received-payment integration are implemented in the current integration branch. The remaining Member 3 work is cross-member integration and verification, especially consuming Member 5's not-yet-present merchant transaction-history endpoint and exercising the complete customer-to-merchant payment flow with Member 4. Backend financial writes remain owned by the backend payment flow; Flutter is display/read-only for authoritative balances and results.

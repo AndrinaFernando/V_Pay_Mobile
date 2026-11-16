@@ -1,14 +1,22 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/network/api_exception.dart';
 import '../../../core/widgets/navigation/vpay_tab_transition.dart';
 import '../../auth/auth_service.dart';
 import '../../auth/models/vpay_user_profile.dart';
 import '../../auth/models/user_profile_result.dart';
 import '../../auth/services/user_api_service.dart';
+import '../models/merchant_balance.dart';
+import '../models/merchant_received_payment.dart';
+import '../services/merchant_balance_service.dart';
+import '../services/merchant_received_payments_service.dart';
 import '../services/payment_intent_service.dart';
 import 'create_payment_request_screen.dart';
 import 'merchant_profile_screen.dart';
+import '../widgets/merchant_received_payment_tile.dart';
 
 const _canvas = Color(0xFFFCF9F8);
 const _surface = Colors.white;
@@ -28,6 +36,8 @@ class MerchantDashboardScreen extends StatefulWidget {
     this.loadProfile,
     this.paymentIntentService,
     this.userApiService,
+    this.merchantBalanceService,
+    this.merchantReceivedPaymentsService,
   });
 
   final VPayUserProfile profile;
@@ -36,6 +46,8 @@ class MerchantDashboardScreen extends StatefulWidget {
   final Future<UserProfileResult> Function()? loadProfile;
   final PaymentIntentService? paymentIntentService;
   final UserApiService? userApiService;
+  final MerchantBalanceService? merchantBalanceService;
+  final MerchantReceivedPaymentsService? merchantReceivedPaymentsService;
 
   @override
   State<MerchantDashboardScreen> createState() =>
@@ -43,7 +55,7 @@ class MerchantDashboardScreen extends StatefulWidget {
 }
 
 class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   int _selectedNavigationIndex = 0;
   bool _profileVisited = false;
   late final AnimationController _tabAnimation = AnimationController(
@@ -54,11 +66,45 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
   late VPayUserProfile _profile = widget.profile;
   bool _isRefreshingProfile = false;
   String? _profileRefreshError;
+  late final MerchantBalanceService _merchantBalanceService;
+  MerchantBalance? _merchantBalance;
+  Future<void>? _balanceLoad;
+  bool _isLoadingBalance = true;
+  String? _balanceError;
+  int _merchantDataRefreshRevision = 0;
+  late final MerchantReceivedPaymentsService _merchantReceivedPaymentsService;
+  List<MerchantReceivedPayment> _receivedPayments = const [];
+  Future<void>? _receivedPaymentsLoad;
+  bool _isLoadingReceivedPayments = true;
+  String? _receivedPaymentsError;
+
+  @override
+  void initState() {
+    super.initState();
+    _merchantBalanceService =
+        widget.merchantBalanceService ?? ApiMerchantBalanceService();
+    _merchantReceivedPaymentsService =
+        widget.merchantReceivedPaymentsService ??
+        ApiMerchantReceivedPaymentsService();
+    WidgetsBinding.instance.addObserver(this);
+    unawaited(_loadBalance());
+    unawaited(_loadReceivedPayments());
+  }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _tabAnimation.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed &&
+        (_selectedNavigationIndex == 0 || _selectedNavigationIndex == 2)) {
+      unawaited(_loadBalance());
+      unawaited(_loadReceivedPayments());
+    }
   }
 
   void _selectVisibleTab(int index) {
@@ -103,15 +149,135 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
       if (mounted) setState(() => _selectedNavigationIndex = 0);
       return;
     }
+    final refreshRevisionBeforePush = _merchantDataRefreshRevision;
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => CreatePaymentRequestScreen(
           paymentIntentService: widget.paymentIntentService,
+          onConfirmedPaymentSuccess: _refreshMerchantData,
         ),
       ),
     );
     if (!mounted) return;
     setState(() => _selectedNavigationIndex = 0);
+    if (_merchantDataRefreshRevision == refreshRevisionBeforePush) {
+      unawaited(_refreshMerchantData());
+    }
+  }
+
+  Future<void> _loadBalance() {
+    final inProgress = _balanceLoad;
+    if (inProgress != null) return inProgress;
+
+    final load = _fetchBalance();
+    _balanceLoad = load;
+    return load.whenComplete(() {
+      if (identical(_balanceLoad, load)) _balanceLoad = null;
+    });
+  }
+
+  Future<void> _fetchBalance() async {
+    if (mounted) {
+      setState(() {
+        _isLoadingBalance = true;
+        _balanceError = null;
+      });
+    }
+
+    try {
+      final balance = await _merchantBalanceService.getMerchantBalance();
+      if (!mounted) return;
+      setState(() {
+        _merchantBalance = balance;
+        _balanceError = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _merchantBalance = null;
+        _balanceError = _balanceErrorMessage(error);
+      });
+    } finally {
+      if (mounted) setState(() => _isLoadingBalance = false);
+    }
+  }
+
+  String _balanceErrorMessage(Object error) {
+    if (error is ApiException) {
+      return switch (error.statusCode) {
+        401 => 'Your session has expired. Sign in again to view your balance.',
+        403 => 'This account is not authorized to view a merchant balance.',
+        404 => 'Your merchant wallet is not available yet.',
+        409 => 'Your merchant wallet is currently unavailable.',
+        _ => 'We could not load your merchant balance. Please try again.',
+      };
+    }
+    return 'Check your connection and retry to load your merchant balance.';
+  }
+
+  Future<void> _refreshDashboard() async {
+    await Future.wait([
+      _refreshProfile(),
+      _loadBalance(),
+      _loadReceivedPayments(),
+    ]);
+  }
+
+  Future<void> _refreshMerchantData() async {
+    _merchantDataRefreshRevision++;
+    await Future.wait([_loadBalance(), _loadReceivedPayments()]);
+  }
+
+  Future<void> _loadReceivedPayments() {
+    final inProgress = _receivedPaymentsLoad;
+    if (inProgress != null) return inProgress;
+
+    final load = _fetchReceivedPayments();
+    _receivedPaymentsLoad = load;
+    return load.whenComplete(() {
+      if (identical(_receivedPaymentsLoad, load)) {
+        _receivedPaymentsLoad = null;
+      }
+    });
+  }
+
+  Future<void> _fetchReceivedPayments() async {
+    if (mounted) {
+      setState(() {
+        _isLoadingReceivedPayments = true;
+        _receivedPaymentsError = null;
+      });
+    }
+
+    try {
+      final payments = await _merchantReceivedPaymentsService
+          .getReceivedPayments(limit: 50);
+      if (!mounted) return;
+      setState(() {
+        _receivedPayments = payments;
+        _receivedPaymentsError = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _receivedPayments = const [];
+        _receivedPaymentsError = _receivedPaymentsErrorMessage(error);
+      });
+    } finally {
+      if (mounted) setState(() => _isLoadingReceivedPayments = false);
+    }
+  }
+
+  String _receivedPaymentsErrorMessage(Object error) {
+    if (error is ApiException) {
+      return switch (error.statusCode) {
+        401 => 'Your session has expired. Please sign in again.',
+        403 => 'This account cannot access merchant payment history.',
+        400 => 'The payment history request is invalid.',
+        _ => 'We could not load received payments. Please try again.',
+      };
+    }
+    return 'Check your connection and retry to load received payments.';
   }
 
   Future<void> _refreshProfile() async {
@@ -153,18 +319,17 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
       _selectVisibleTab(index);
       return;
     }
+    if (index == 2) {
+      _selectVisibleTab(index);
+      unawaited(_loadReceivedPayments());
+      return;
+    }
     if (index == 0) {
       _selectVisibleTab(0);
+      unawaited(_refreshMerchantData());
       return;
     }
     setState(() => _selectedNavigationIndex = 0);
-    _showComingSoon('Payment history');
-  }
-
-  void _showComingSoon(String feature) {
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(SnackBar(content: Text('$feature is coming soon.')));
   }
 
   Future<void> _openProfile() async {
@@ -181,6 +346,7 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
         ),
       ),
     );
+    if (mounted) await _refreshMerchantData();
   }
 
   @override
@@ -194,9 +360,14 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
           child: VPayTabTransition(
             animation: _tabAnimation,
             child: IndexedStack(
-              index: _selectedNavigationIndex == 3 ? 1 : 0,
+              index: switch (_selectedNavigationIndex) {
+                2 => 1,
+                3 => 2,
+                _ => 0,
+              },
               children: [
                 _buildDashboardTab(),
+                _buildPaymentsTab(),
                 _profileVisited ? _buildProfileTab() : const SizedBox.shrink(),
               ],
             ),
@@ -209,7 +380,7 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
 
   Widget _buildDashboardTab() {
     return RefreshIndicator(
-      onRefresh: _refreshProfile,
+      onRefresh: _refreshDashboard,
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         child: Column(
@@ -224,7 +395,12 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const _MerchantBalanceCard(),
+                      _MerchantBalanceCard(
+                        balance: _merchantBalance,
+                        isLoading: _isLoadingBalance,
+                        errorMessage: _balanceError,
+                        onRetry: () => unawaited(_loadBalance()),
+                      ),
                       const SizedBox(height: 16),
                       _buildCreateRequestButton(),
                       const SizedBox(height: 28),
@@ -264,7 +440,105 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
       loadProfile: widget.loadProfile,
       userApiService: widget.userApiService,
       onProfileUpdated: (profile) => setState(() => _profile = profile),
-      onBack: () => _selectVisibleTab(0),
+      onBack: () {
+        _selectVisibleTab(0);
+        unawaited(_refreshMerchantData());
+      },
+    );
+  }
+
+  Widget _buildPaymentsTab() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildBrandBar(),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
+          child: Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Received Payments',
+                  key: Key('merchantReceivedPaymentsTitle'),
+                  style: TextStyle(
+                    color: _ink,
+                    fontSize: 21,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Text(
+                '${_receivedPayments.length} latest',
+                style: const TextStyle(color: _supporting, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: RefreshIndicator(
+            key: const Key('merchantReceivedPaymentsRefresh'),
+            onRefresh: _loadReceivedPayments,
+            color: _electric,
+            child: _buildReceivedPaymentsList(),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildReceivedPaymentsList() {
+    if (_isLoadingReceivedPayments) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
+        children: const [_ReceivedPaymentsSkeleton(fullPage: true)],
+      );
+    }
+    if (_receivedPaymentsError != null) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(24),
+        children: [
+          _ReceivedPaymentsMessage(
+            icon: Icons.cloud_off_outlined,
+            title: 'Unable to load received payments',
+            message: _receivedPaymentsError!,
+            actionLabel: 'Retry',
+            onAction: () => unawaited(_loadReceivedPayments()),
+          ),
+        ],
+      );
+    }
+    if (_receivedPayments.isEmpty) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(24),
+        children: const [
+          _ReceivedPaymentsMessage(
+            icon: Icons.receipt_long_outlined,
+            title: 'No received payments yet',
+            message: 'Completed QR payments will appear here.',
+          ),
+        ],
+      );
+    }
+
+    return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
+      itemCount: _receivedPayments.length,
+      itemBuilder: (context, index) => DecoratedBox(
+        decoration: BoxDecoration(
+          color: _surface,
+          borderRadius: BorderRadius.vertical(
+            top: index == 0 ? const Radius.circular(18) : Radius.zero,
+            bottom: index == _receivedPayments.length - 1
+                ? const Radius.circular(18)
+                : Radius.zero,
+          ),
+        ),
+        child: MerchantReceivedPaymentTile(payment: _receivedPayments[index]),
+      ),
     );
   }
 
@@ -420,41 +694,46 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
               ),
             ),
             TextButton(
-              onPressed: () => _showComingSoon('Payment history'),
+              key: const Key('viewAllMerchantPayments'),
+              onPressed: () => _onNavigationSelected(2),
               child: const Text('View all'),
             ),
           ],
         ),
         const SizedBox(height: 4),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 28),
-          decoration: BoxDecoration(
-            color: _surface,
-            border: Border.all(color: _divider),
-            borderRadius: BorderRadius.circular(20),
+        if (_isLoadingReceivedPayments)
+          const _ReceivedPaymentsSkeleton()
+        else if (_receivedPaymentsError != null)
+          _ReceivedPaymentsMessage(
+            key: const Key('merchantRecentPaymentsError'),
+            icon: Icons.cloud_off_outlined,
+            title: 'Unable to load received payments',
+            message: _receivedPaymentsError!,
+            actionLabel: 'Retry',
+            onAction: () => unawaited(_loadReceivedPayments()),
+          )
+        else if (_receivedPayments.isEmpty)
+          const _ReceivedPaymentsMessage(
+            key: Key('merchantRecentPaymentsEmpty'),
+            icon: Icons.receipt_long_outlined,
+            title: 'No received payments to show yet',
+            message: 'Completed QR payments will appear here.',
+          )
+        else
+          Container(
+            decoration: BoxDecoration(
+              color: _surface,
+              border: Border.all(color: _divider),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                for (final payment in _receivedPayments.take(3))
+                  MerchantReceivedPaymentTile(payment: payment, compact: true),
+              ],
+            ),
           ),
-          child: const Column(
-            children: [
-              Icon(Icons.receipt_long_outlined, color: _supporting, size: 30),
-              SizedBox(height: 10),
-              Text(
-                'No received payments to show yet',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: _ink,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              SizedBox(height: 5),
-              Text(
-                'Payment history will appear here when it is available.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: _supporting, fontSize: 12, height: 1.4),
-              ),
-            ],
-          ),
-        ),
       ],
     );
   }
@@ -505,8 +784,154 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
   }
 }
 
+class _ReceivedPaymentsSkeleton extends StatelessWidget {
+  const _ReceivedPaymentsSkeleton({this.fullPage = false});
+
+  final bool fullPage;
+
+  @override
+  Widget build(BuildContext context) {
+    final item = Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _surface,
+        border: Border.all(color: _divider),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: const Color(0xFFE7ECF3),
+              borderRadius: BorderRadius.circular(13),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 135,
+                  height: 13,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE7ECF3),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  width: 185,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE7ECF3),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+
+    return Semantics(
+      label: 'Loading received payments',
+      child: fullPage
+          ? Column(
+              children: [
+                for (var index = 0; index < 5; index++) ...[
+                  item,
+                  if (index < 4) const SizedBox(height: 8),
+                ],
+              ],
+            )
+          : Container(
+              key: const Key('merchantRecentPaymentsSkeleton'),
+              child: Column(children: [item, const SizedBox(height: 8), item]),
+            ),
+    );
+  }
+}
+
+class _ReceivedPaymentsMessage extends StatelessWidget {
+  const _ReceivedPaymentsMessage({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.message,
+    this.actionLabel,
+    this.onAction,
+  });
+
+  final IconData icon;
+  final String title;
+  final String message;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 26),
+      decoration: BoxDecoration(
+        color: _surface,
+        border: Border.all(color: _divider),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: _supporting, size: 30),
+          const SizedBox(height: 10),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: _ink,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: _supporting,
+              fontSize: 12,
+              height: 1.4,
+            ),
+          ),
+          if (actionLabel != null && onAction != null) ...[
+            const SizedBox(height: 8),
+            TextButton.icon(
+              key: const Key('retryMerchantReceivedPayments'),
+              onPressed: onAction,
+              icon: const Icon(Icons.refresh_rounded, size: 17),
+              label: Text(actionLabel!),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _MerchantBalanceCard extends StatelessWidget {
-  const _MerchantBalanceCard();
+  const _MerchantBalanceCard({
+    required this.balance,
+    required this.isLoading,
+    required this.errorMessage,
+    required this.onRetry,
+  });
+
+  final MerchantBalance? balance;
+  final bool isLoading;
+  final String? errorMessage;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -567,27 +992,86 @@ class _MerchantBalanceCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 22),
-              const Text(
-                'Balance details aren’t available yet',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'Your merchant balance will appear here when the backend provides it.',
-                style: TextStyle(
-                  color: Color(0xFFB8CEE8),
-                  fontSize: 12,
-                  height: 1.4,
-                ),
-              ),
+              if (balance != null)
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    balance!.formattedLkr,
+                    key: const Key('merchantBalanceValue'),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 27,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.4,
+                    ),
+                  ),
+                )
+              else if (isLoading)
+                _buildSkeleton()
+              else
+                _buildError(),
             ],
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildSkeleton() {
+    return Semantics(
+      label: 'Loading merchant balance',
+      child: Column(
+        key: const Key('merchantBalanceSkeleton'),
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 190,
+            height: 28,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Container(
+            width: 220,
+            height: 12,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(6),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildError() {
+    return Column(
+      key: const Key('merchantBalanceError'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          errorMessage ?? 'We could not load your merchant balance.',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 4),
+        TextButton.icon(
+          key: const Key('merchantBalanceRetry'),
+          onPressed: onRetry,
+          style: TextButton.styleFrom(
+            foregroundColor: const Color(0xFF8FD8FF),
+            padding: EdgeInsets.zero,
+          ),
+          icon: const Icon(Icons.refresh_rounded, size: 17),
+          label: const Text('Retry'),
+        ),
+      ],
     );
   }
 }

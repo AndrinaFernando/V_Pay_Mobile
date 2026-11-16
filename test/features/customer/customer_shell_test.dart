@@ -6,6 +6,8 @@ import 'package:vpay_mobile/features/auth/models/vpay_user_profile.dart';
 import 'package:vpay_mobile/features/customer/screens/customer_shell.dart';
 import 'package:vpay_mobile/core/widgets/navigation/vpay_tab_transition.dart';
 
+import '../../support/fake_dashboard_services.dart';
+
 const _customerProfile = VPayUserProfile(
   uid: 'cust-1',
   name: 'Nimal Perera',
@@ -27,16 +29,20 @@ class _FakeAuthService implements AuthService {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+CustomerShell _shell(AuthService auth) => CustomerShell(
+  profile: _customerProfile,
+  authService: auth,
+  cardApiService: FakeDashboardCardService(),
+  transactionService: FakeDashboardTransactionService(),
+);
+
 void main() {
   testWidgets('reduced motion switches tabs without a fade', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         home: MediaQuery(
           data: const MediaQueryData(disableAnimations: true),
-          child: CustomerShell(
-            profile: _customerProfile,
-            authService: _FakeAuthService(),
-          ),
+          child: _shell(_FakeAuthService()),
         ),
       ),
     );
@@ -56,14 +62,7 @@ void main() {
   testWidgets(
     'tab fade preserves Home scroll and selected state after rapid taps',
     (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          home: CustomerShell(
-            profile: _customerProfile,
-            authService: _FakeAuthService(),
-          ),
-        ),
-      );
+      await tester.pumpWidget(MaterialApp(home: _shell(_FakeAuthService())));
       final homeScroll = find.byType(SingleChildScrollView).first;
       await tester.drag(homeScroll, const Offset(0, -300));
       await tester.pumpAndSettle();
@@ -114,14 +113,7 @@ void main() {
   testWidgets('customer shell has Home, Scan & Pay, Activity, Profile tabs', (
     tester,
   ) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        home: CustomerShell(
-          profile: _customerProfile,
-          authService: _FakeAuthService(),
-        ),
-      ),
-    );
+    await tester.pumpWidget(MaterialApp(home: _shell(_FakeAuthService())));
 
     final nav = tester.widget<BottomNavigationBar>(
       find.byType(BottomNavigationBar),
@@ -134,14 +126,7 @@ void main() {
   });
 
   testWidgets('Profile tab shows the unified profile screen', (tester) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        home: CustomerShell(
-          profile: _customerProfile,
-          authService: _FakeAuthService(),
-        ),
-      ),
-    );
+    await tester.pumpWidget(MaterialApp(home: _shell(_FakeAuthService())));
 
     // Tap Profile tab
     await tester.tap(find.text('Profile').last);
@@ -154,22 +139,25 @@ void main() {
     expect(find.text('CUSTOMER'), findsOneWidget);
   });
 
-  testWidgets('Scan & Pay and Activity tabs still show coming soon', (
+  testWidgets('Scan & Pay and Activity tabs show the integrated features', (
     tester,
   ) async {
+    final transactions = FakeDashboardTransactionService();
     await tester.pumpWidget(
       MaterialApp(
         home: CustomerShell(
           profile: _customerProfile,
           authService: _FakeAuthService(),
+          cardApiService: FakeDashboardCardService(),
+          transactionService: transactions,
         ),
       ),
     );
 
-    // Tap Scan & Pay
     await tester.tap(find.text('Scan & Pay').last);
     await tester.pumpAndSettle();
-    expect(find.text('Coming soon'), findsOneWidget);
+    expect(find.byKey(const ValueKey('scanMerchantQrButton')), findsOneWidget);
+    expect(find.textContaining('Scan a VPay merchant QR code'), findsOneWidget);
     await tester.tap(find.text('Home').last);
     await tester.pumpAndSettle();
     expect(
@@ -180,21 +168,17 @@ void main() {
     );
     expect(find.textContaining('Nimal'), findsOneWidget);
 
-    // Tap Activity
     await tester.tap(find.text('Activity').last);
     await tester.pumpAndSettle();
-    expect(find.text('Coming soon'), findsOneWidget);
+    expect(find.text('No payment activity yet'), findsOneWidget);
+    expect(transactions.requests, greaterThanOrEqualTo(2));
   });
 
   testWidgets('customer profile logout calls AuthService.signOut', (
     tester,
   ) async {
     final auth = _FakeAuthService();
-    await tester.pumpWidget(
-      MaterialApp(
-        home: CustomerShell(profile: _customerProfile, authService: auth),
-      ),
-    );
+    await tester.pumpWidget(MaterialApp(home: _shell(auth)));
 
     // Navigate to Profile tab
     await tester.tap(find.text('Profile').last);

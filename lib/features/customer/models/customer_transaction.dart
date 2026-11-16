@@ -1,4 +1,5 @@
 import '../../customer_payment/models/customer_payment_preview.dart';
+import '../../topup/services/topup_service.dart';
 
 class CustomerTransaction {
   const CustomerTransaction({
@@ -9,6 +10,8 @@ class CustomerTransaction {
     required this.currency,
     required this.status,
     required this.createdAt,
+    this.isTopUp = false,
+    this.statusLabel,
   });
 
   final String transactionId;
@@ -17,7 +20,32 @@ class CustomerTransaction {
   final int amountMinor;
   final String currency;
   final CustomerPaymentStatus status;
-  final DateTime createdAt;
+  final DateTime? createdAt;
+  final bool isTopUp;
+  final String? statusLabel;
+
+  factory CustomerTransaction.fromTopUp(TopUp topUp) {
+    final amount = topUp.status == 'SUCCESS'
+        ? (topUp.amount ?? topUp.requestedAmount)
+        : topUp.requestedAmount;
+    return CustomerTransaction(
+      transactionId: 'topup-${topUp.id}',
+      paymentReference: topUp.id,
+      merchantName: 'Rupio Top-up',
+      amountMinor: amount * 100,
+      currency: 'LKR',
+      status: topUp.status == 'SUCCESS'
+          ? CustomerPaymentStatus.success
+          : topUp.status == 'FAILED' || topUp.status == 'CANCELLED'
+          ? CustomerPaymentStatus.failed
+          : topUp.status == 'TIMEOUT'
+          ? CustomerPaymentStatus.expired
+          : CustomerPaymentStatus.pending,
+      statusLabel: topUp.status,
+      createdAt: topUp.createdAt,
+      isTopUp: true,
+    );
+  }
 
   factory CustomerTransaction.fromJson(Map<String, dynamic> json) {
     final amountMinor = json['amountMinor'];

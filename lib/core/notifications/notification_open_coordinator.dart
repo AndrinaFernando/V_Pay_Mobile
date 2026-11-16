@@ -5,9 +5,10 @@ import 'package:flutter/foundation.dart';
 import 'notification_service.dart';
 
 class NotificationOpen {
-  const NotificationOpen(this.id, this.type);
+  const NotificationOpen(this.id, this.type, [this.bindingId]);
   final String? id;
   final Object? type;
+  final Object? bindingId;
 }
 
 /// Stores only a refresh intent, never payload text or financial data.
@@ -18,6 +19,7 @@ class NotificationOpenCoordinator extends ChangeNotifier {
     required Stream<String?> sessions,
     required Stream<NotificationOpen> opened,
     required Future<NotificationOpen?> Function() initial,
+    this.isTrusted,
   }) {
     _uid = currentUid();
     _subscriptions.add(sessions.listen(_setSession));
@@ -38,6 +40,7 @@ class NotificationOpenCoordinator extends ChangeNotifier {
     }());
   }
   final String? Function() currentUid;
+  final bool Function(String?, Object?)? isTrusted;
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   final Set<String> _seen = {};
   String? _uid;
@@ -61,6 +64,7 @@ class NotificationOpenCoordinator extends ChangeNotifier {
     _syncSession();
     final type = notificationType(event.type);
     if (_uid == null || type == null) return;
+    if (isTrusted != null && !isTrusted!(_uid, event.bindingId)) return;
     final id = event.id;
     if (id != null && !_seen.add(id)) return;
     if (_seen.length > 64) _seen.remove(_seen.first);

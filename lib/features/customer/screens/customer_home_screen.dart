@@ -10,7 +10,10 @@ import '../../auth/models/vpay_user_profile.dart';
 import '../../card/models/vpay_card.dart';
 import '../../card/services/card_api_service.dart';
 import '../../topup/screens/topup_screen.dart';
+import '../../topup/services/topup_service.dart';
 import '../models/customer_transaction.dart';
+import '../services/customer_activity_service.dart';
+import '../widgets/customer_activity_notice.dart';
 import '../widgets/customer_transaction_tile.dart';
 
 const _electric = Color(0xFF0072DC);
@@ -32,6 +35,8 @@ class CustomerHomeScreen extends StatefulWidget {
     this.balanceRefreshTrigger = 0,
     this.transactionsFuture,
     this.onRefreshTransactions,
+    this.onTopUpReturned,
+    this.topUpService,
   });
 
   final VPayUserProfile profile;
@@ -40,6 +45,8 @@ class CustomerHomeScreen extends StatefulWidget {
   final int balanceRefreshTrigger;
   final Future<List<CustomerTransaction>>? transactionsFuture;
   final Future<void> Function()? onRefreshTransactions;
+  final Future<void> Function(bool pending)? onTopUpReturned;
+  final TopUpService? topUpService;
 
   @override
   State<CustomerHomeScreen> createState() => _CustomerHomeScreenState();
@@ -86,10 +93,21 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
   }
 
   Future<void> _openTopUp() async {
-    final result = await Navigator.of(context)
-        .push(MaterialPageRoute<String>(builder: (_) => const TopUpScreen()));
+    final result = await Navigator.of(context).push(
+      MaterialPageRoute<String>(
+        builder: (_) => TopUpScreen(service: widget.topUpService),
+      ),
+    );
     if (!mounted) return;
-    _retry();
+    if (widget.onTopUpReturned != null) {
+      await widget.onTopUpReturned!(
+        result == null || result == 'Waiting for payment confirmation',
+      );
+    } else {
+      _retry();
+      await widget.onRefreshTransactions?.call();
+    }
+    if (!mounted) return;
     if (result != null) {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(result)));
@@ -349,20 +367,28 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
             }
 
             final transactions = snapshot.data ?? const [];
+            final warning =
+                transactions is CustomerActivityList && transactions.isPartial
+                ? transactions.warning
+                : null;
             if (transactions.isEmpty) {
-              return const _RecentActivityMessage(
+              return _RecentActivityMessage(
                 child: Column(
                   children: [
-                    Icon(
+                    if (warning != null)
+                      CustomerActivityNotice(message: warning),
+                    const Icon(
                       Icons.receipt_long_outlined,
                       color: _secondary,
                       size: 32,
                     ),
-                    SizedBox(height: 10),
+                    const SizedBox(height: 10),
                     Text(
-                      'No recent activity yet',
+                      warning == null
+                          ? 'No recent activity yet'
+                          : 'No activity from the available source',
                       textAlign: TextAlign.center,
-                      style: TextStyle(
+                      style: const TextStyle(
                         color: _supporting,
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
@@ -382,6 +408,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
               clipBehavior: Clip.antiAlias,
               child: Column(
                 children: [
+                  if (warning != null) CustomerActivityNotice(message: warning),
                   for (final transaction in recent)
                     CustomerTransactionTile(
                       transaction: transaction,

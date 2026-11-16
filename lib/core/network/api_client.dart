@@ -50,6 +50,19 @@ class ApiClient {
     );
   }
 
+  Future<http.Response> authenticatedDelete(String path, {Object? body}) async {
+    final token = await _getToken();
+    return _httpClient.delete(
+      Uri.parse('${ApiConfig.baseUrl}$path'),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: body == null ? null : jsonEncode(body),
+    );
+  }
+
   Future<String> _getToken() async {
     final token = await _authService.getFreshIdToken();
 

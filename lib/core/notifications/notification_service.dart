@@ -31,6 +31,7 @@ class NotificationService {
     required this.initialMessage,
     required this.isCurrentSession,
     required this.registerToken,
+    this.acceptMessage,
   });
 
   final Future<bool> Function() requestPermission;
@@ -41,6 +42,7 @@ class NotificationService {
   final Future<Object?> Function() initialMessage;
   final bool Function() isCurrentSession;
   final Future<RegistrationResult> Function(String) registerToken;
+  final bool Function(Object?)? acceptMessage;
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   void Function(NotificationType, bool)? _onMessage;
   void detachMessages() => _onMessage = null;
@@ -64,7 +66,8 @@ class NotificationService {
     if (_started) return recover();
     _started = true;
     void receive(Object? value, bool opened) {
-      final type = notificationType(value);
+      if (acceptMessage != null && !acceptMessage!(value)) return;
+      final type = notificationType(value is Map ? value['type'] : value);
       if (_active && type != null) _onMessage?.call(type, opened);
     }
 
@@ -159,6 +162,7 @@ class NotificationService {
 class NotificationTokenApi {
   NotificationTokenApi(this.client);
   final ApiClient client;
+  String? bindingId;
 
   Future<RegistrationResult> register(String token) async {
     try {
@@ -170,6 +174,17 @@ class NotificationTokenApi {
       if (response.statusCode == 404) return RegistrationResult.missingProfile;
       if (response.statusCode == 200 &&
           jsonDecode(response.body)['success'] == true) {
+        final data = jsonDecode(response.body)['data'];
+        bindingId = data is Map && data['bindingId'] is String
+            ? data['bindingId'] as String
+            : null;
+        if (bindingId == null ||
+            !RegExp(
+              r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+            ).hasMatch(bindingId!)) {
+          bindingId = null;
+          return RegistrationResult.failed;
+        }
         return RegistrationResult.registered;
       }
       return RegistrationResult.failed;
@@ -178,5 +193,12 @@ class NotificationTokenApi {
     } catch (_) {
       return RegistrationResult.failed;
     }
+  }
+
+  Future<void> unregister(String token, String bindingId) async {
+    await client.authenticatedDelete(
+      '/api/notifications/token',
+      body: {'fcmToken': token, 'bindingId': bindingId},
+    );
   }
 }

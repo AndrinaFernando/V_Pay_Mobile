@@ -45,11 +45,12 @@ class _RupioCheckoutScreenState extends State<RupioCheckoutScreen> {
                 : NavigationDecision.prevent;
           },
           onPageStarted: (_) {
-            if (mounted)
+            if (mounted) {
               setState(() {
                 _loading = true;
                 _error = null;
               });
+            }
           },
           onPageFinished: (_) {
             if (mounted) setState(() => _loading = false);

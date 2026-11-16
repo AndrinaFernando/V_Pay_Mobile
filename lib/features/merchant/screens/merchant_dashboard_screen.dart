@@ -26,6 +26,7 @@ class MerchantDashboardScreen extends StatefulWidget {
     this.onCreatePaymentRequest,
     this.loadProfile,
     this.paymentIntentService,
+    this.userApiService,
   });
 
   final VPayUserProfile profile;
@@ -33,6 +34,7 @@ class MerchantDashboardScreen extends StatefulWidget {
   final VoidCallback? onCreatePaymentRequest;
   final Future<UserProfileResult> Function()? loadProfile;
   final PaymentIntentService? paymentIntentService;
+  final UserApiService? userApiService;
 
   @override
   State<MerchantDashboardScreen> createState() =>
@@ -150,6 +152,8 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen> {
           profile: _profile,
           authService: authService,
           loadProfile: widget.loadProfile,
+          userApiService: widget.userApiService,
+          onProfileUpdated: (profile) => setState(() => _profile = profile),
         ),
       ),
     );
@@ -227,6 +231,8 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen> {
       profile: _profile,
       authService: authService,
       loadProfile: widget.loadProfile,
+      userApiService: widget.userApiService,
+      onProfileUpdated: (profile) => setState(() => _profile = profile),
       onBack: () => setState(() => _selectedNavigationIndex = 0),
     );
   }

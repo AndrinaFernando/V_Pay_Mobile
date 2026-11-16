@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../auth/auth_service.dart';
 import '../../auth/models/vpay_user_profile.dart';
+import '../../auth/services/user_api_service.dart';
+import '../../profile/profile_screen.dart';
 import 'customer_home_screen.dart';
 
 const _electric = Color(0xFF0072DC);
@@ -13,43 +15,29 @@ class CustomerShell extends StatefulWidget {
     super.key,
     required this.profile,
     required this.authService,
+    this.userApiService,
   });
 
   final VPayUserProfile profile;
   final AuthService authService;
+  final UserApiService? userApiService;
 
   @override
   State<CustomerShell> createState() => _CustomerShellState();
 }
 
 class _CustomerShellState extends State<CustomerShell> {
-  late final Widget _home;
+  late VPayUserProfile _profile;
   int _selectedIndex = 0;
-  bool _isSigningOut = false;
 
   @override
   void initState() {
     super.initState();
-    _home = CustomerHomeScreen(profile: widget.profile);
+    _profile = widget.profile;
   }
 
-  Future<void> _signOut() async {
-    if (_isSigningOut) return;
-    setState(() => _isSigningOut = true);
-
-    try {
-      await widget.authService.signOut();
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Unable to sign out. Please try again.'),
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isSigningOut = false);
-    }
+  void _onProfileUpdated(VPayUserProfile profile) {
+    setState(() => _profile = profile);
   }
 
   @override
@@ -61,7 +49,7 @@ class _CustomerShellState extends State<CustomerShell> {
         child: IndexedStack(
           index: _selectedIndex,
           children: [
-            _home,
+            CustomerHomeScreen(profile: _profile),
             const _ComingSoonTab(
               icon: Icons.qr_code_scanner_rounded,
               title: 'Scan & Pay',
@@ -70,13 +58,11 @@ class _CustomerShellState extends State<CustomerShell> {
               icon: Icons.receipt_long_outlined,
               title: 'Activity',
             ),
-            _ComingSoonTab(
-              icon: Icons.person_outline_rounded,
-              title: 'Profile',
-              footer: TextButton(
-                onPressed: _isSigningOut ? null : _signOut,
-                child: Text(_isSigningOut ? 'Signing out…' : 'Sign Out'),
-              ),
+            ProfileScreen(
+              profile: _profile,
+              authService: widget.authService,
+              userApiService: widget.userApiService,
+              onProfileUpdated: _onProfileUpdated,
             ),
           ],
         ),
@@ -125,11 +111,10 @@ class _CustomerShellState extends State<CustomerShell> {
 }
 
 class _ComingSoonTab extends StatelessWidget {
-  const _ComingSoonTab({required this.icon, required this.title, this.footer});
+  const _ComingSoonTab({required this.icon, required this.title});
 
   final IconData icon;
   final String title;
-  final Widget? footer;
 
   @override
   Widget build(BuildContext context) {
@@ -154,7 +139,6 @@ class _ComingSoonTab extends StatelessWidget {
               'Coming soon',
               style: TextStyle(color: _secondary, fontSize: 16),
             ),
-            if (footer != null) ...[const SizedBox(height: 20), footer!],
           ],
         ),
       ),

@@ -6,6 +6,7 @@ import 'package:vpay_mobile/features/auth/models/user_profile_result.dart';
 import 'package:vpay_mobile/features/auth/models/vpay_user_profile.dart';
 import 'package:vpay_mobile/features/merchant/screens/merchant_dashboard_screen.dart';
 import 'package:vpay_mobile/features/merchant/services/payment_intent_service.dart';
+import 'package:vpay_mobile/features/profile/profile_screen.dart';
 
 const _merchantProfile = VPayUserProfile(
   uid: 'merchant-uid',
@@ -164,8 +165,14 @@ void main() {
     await tester.tap(find.byKey(const Key('merchantProfileAction')));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('merchantProfileTitle')), findsOneWidget);
+    expect(find.byType(ProfileScreen), findsOneWidget);
     expect(find.text('Central Canteen'), findsWidgets);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('merchantDashboardBusinessDetails')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('pull to refresh reloads the authenticated merchant profile', (
@@ -251,7 +258,7 @@ void main() {
       await tester.tap(find.text('Profile').last);
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const Key('merchantProfileTitle')), findsOneWidget);
+      expect(find.byType(ProfileScreen), findsOneWidget);
       expect(find.text('Central Canteen'), findsWidgets);
       expect(
         tester
@@ -259,6 +266,15 @@ void main() {
             .currentIndex,
         3,
       );
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<BottomNavigationBar>(find.byType(BottomNavigationBar))
+            .currentIndex,
+        0,
+      );
+      expect(find.text('Create Payment Request'), findsOneWidget);
     },
   );
 }

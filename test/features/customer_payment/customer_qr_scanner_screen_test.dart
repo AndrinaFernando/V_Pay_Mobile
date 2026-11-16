@@ -309,6 +309,16 @@ void main() {
     expect(find.byType(CustomerPaymentPreviewScreen), findsOneWidget);
     expect(find.text('VPay Test Merchant'), findsOneWidget);
     expect(previewService.references, ['payment-ref-123']);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byType(CustomerPaymentPreviewScreen), findsNothing);
+    expect(find.byType(CustomerQrScannerScreen), findsNothing);
+    expect(
+      tester
+          .widget<BottomNavigationBar>(find.byType(BottomNavigationBar))
+          .currentIndex,
+      0,
+    );
   });
 
   testWidgets('verified payment success refreshes the retained Home card', (

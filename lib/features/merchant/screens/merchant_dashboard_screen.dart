@@ -57,6 +57,7 @@ class MerchantDashboardScreen extends StatefulWidget {
 class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   int _selectedNavigationIndex = 0;
+  final List<int> _tabHistory = [];
   bool _profileVisited = false;
   late final AnimationController _tabAnimation = AnimationController(
     vsync: this,
@@ -107,14 +108,25 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
     }
   }
 
-  void _selectVisibleTab(int index) {
+  void _selectVisibleTab(int index, {bool remember = true}) {
     if (index == _selectedNavigationIndex) return;
+    if (remember) _tabHistory.add(_selectedNavigationIndex);
     setState(() {
       _selectedNavigationIndex = index;
       if (index == 3) _profileVisited = true;
     });
     if (MediaQuery.disableAnimationsOf(context)) return;
     _tabAnimation.forward(from: 0);
+  }
+
+  void _goBackTab() {
+    if (_tabHistory.isEmpty) return;
+    _selectVisibleTab(_tabHistory.removeLast(), remember: false);
+    if (_selectedNavigationIndex == 0) {
+      unawaited(_refreshMerchantData());
+    } else if (_selectedNavigationIndex == 2) {
+      unawaited(_loadReceivedPayments());
+    }
   }
 
   String get _headerBusinessName {
@@ -146,7 +158,6 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
   Future<void> _showCreateRequest() async {
     if (widget.onCreatePaymentRequest != null) {
       widget.onCreatePaymentRequest!();
-      if (mounted) setState(() => _selectedNavigationIndex = 0);
       return;
     }
     final refreshRevisionBeforePush = _merchantDataRefreshRevision;
@@ -159,7 +170,6 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
       ),
     );
     if (!mounted) return;
-    setState(() => _selectedNavigationIndex = 0);
     if (_merchantDataRefreshRevision == refreshRevisionBeforePush) {
       unawaited(_refreshMerchantData());
     }
@@ -311,7 +321,7 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
 
   void _onNavigationSelected(int index) {
     if (index == 1) {
-      setState(() => _selectedNavigationIndex = index);
+      // Create is a pushed route, not a tab; retain its originating tab.
       _showCreateRequest();
       return;
     }
@@ -351,29 +361,38 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
 
   @override
   Widget build(BuildContext context) {
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.dark.copyWith(statusBarColor: _canvas),
-      child: Scaffold(
-        backgroundColor: _canvas,
-        body: SafeArea(
-          bottom: false,
-          child: VPayTabTransition(
-            animation: _tabAnimation,
-            child: IndexedStack(
-              index: switch (_selectedNavigationIndex) {
-                2 => 1,
-                3 => 2,
-                _ => 0,
-              },
-              children: [
-                _buildDashboardTab(),
-                _buildPaymentsTab(),
-                _profileVisited ? _buildProfileTab() : const SizedBox.shrink(),
-              ],
+    // Keep the root route available until its tab history is exhausted.
+    return PopScope<Object?>(
+      canPop: _tabHistory.isEmpty,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _goBackTab();
+      },
+      child: AnnotatedRegion<SystemUiOverlayStyle>(
+        value: SystemUiOverlayStyle.dark.copyWith(statusBarColor: _canvas),
+        child: Scaffold(
+          backgroundColor: _canvas,
+          body: SafeArea(
+            bottom: false,
+            child: VPayTabTransition(
+              animation: _tabAnimation,
+              child: IndexedStack(
+                index: switch (_selectedNavigationIndex) {
+                  2 => 1,
+                  3 => 2,
+                  _ => 0,
+                },
+                children: [
+                  _buildDashboardTab(),
+                  _buildPaymentsTab(),
+                  _profileVisited
+                      ? _buildProfileTab()
+                      : const SizedBox.shrink(),
+                ],
+              ),
             ),
           ),
+          bottomNavigationBar: _buildBottomNavigationBar(),
         ),
-        bottomNavigationBar: _buildBottomNavigationBar(),
       ),
     );
   }
@@ -440,10 +459,7 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
       loadProfile: widget.loadProfile,
       userApiService: widget.userApiService,
       onProfileUpdated: (profile) => setState(() => _profile = profile),
-      onBack: () {
-        _selectVisibleTab(0);
-        unawaited(_refreshMerchantData());
-      },
+      onBack: _goBackTab,
     );
   }
 

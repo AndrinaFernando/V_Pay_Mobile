@@ -24,10 +24,12 @@ class CreatePaymentRequestScreen extends StatefulWidget {
   const CreatePaymentRequestScreen({
     super.key,
     this.paymentIntentService,
+    this.onConfirmedPaymentSuccess,
     this.amountLimits = PaymentAmountLimits.lkrDefault,
   });
 
   final PaymentIntentService? paymentIntentService;
+  final Future<void> Function()? onConfirmedPaymentSuccess;
   final PaymentAmountLimits amountLimits;
 
   @override
@@ -111,6 +113,7 @@ class _CreatePaymentRequestScreenState
           builder: (_) => PaymentIntentQrScreen(
             paymentIntent: intent,
             paymentIntentService: _paymentIntentService,
+            onConfirmedSuccess: widget.onConfirmedPaymentSuccess,
           ),
         ),
       );

@@ -263,11 +263,6 @@ void main() {
     await tester.tap(find.text('Continue to Rupio'));
     await tester.pump();
     expect(service.createdAmount, isNull);
-    expect(
-      find.text(
-        'Invalid amount. Enter a whole number from Rs. 1 to Rs. 1,000,000.',
-      ),
-      findsOneWidget,
-    );
+    expect(find.text('Invalid amount'), findsOneWidget);
   });
 }

@@ -13,6 +13,7 @@ import '../models/customer_transaction.dart';
 import '../services/customer_transaction_service.dart';
 import 'customer_activity_screen.dart';
 import 'customer_home_screen.dart';
+import 'customer_profile_screen.dart';
 
 const _electric = Color(0xFF0072DC);
 const _ink = Color(0xFF222222);
@@ -162,13 +163,10 @@ class _CustomerShellState extends State<CustomerShell> {
               transactionsFuture: _transactionsFuture,
               onRefresh: _refreshTransactions,
             ),
-            _ComingSoonTab(
-              icon: Icons.person_outline_rounded,
-              title: 'Profile',
-              footer: TextButton(
-                onPressed: _isSigningOut ? null : _signOut,
-                child: Text(_isSigningOut ? 'Signing out…' : 'Sign Out'),
-              ),
+            CustomerProfileScreen(
+              profile: widget.profile,
+              isSigningOut: _isSigningOut,
+              onSignOut: _signOut,
             ),
           ],
         ),
@@ -284,44 +282,6 @@ class _ScanAndPayTab extends StatelessWidget {
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ComingSoonTab extends StatelessWidget {
-  const _ComingSoonTab({required this.icon, required this.title, this.footer});
-
-  final IconData icon;
-  final String title;
-  final Widget? footer;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 44, color: _electric),
-            const SizedBox(height: 18),
-            Text(
-              title,
-              style: const TextStyle(
-                color: _ink,
-                fontSize: 24,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Coming soon',
-              style: TextStyle(color: _secondary, fontSize: 16),
-            ),
-            if (footer != null) ...[const SizedBox(height: 20), footer!],
-          ],
         ),
       ),
     );

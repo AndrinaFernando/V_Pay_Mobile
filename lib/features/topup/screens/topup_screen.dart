@@ -8,8 +8,7 @@ import 'topup_history_screen.dart';
 
 const _blue = Color(0xFF0072DC);
 const _ink = Color(0xFF222222);
-const _invalidAmount =
-    'Invalid amount. Enter a whole number from Rs. 1 to Rs. 1,000,000.';
+const _invalidAmount = 'Invalid amount';
 
 class TopUpScreen extends StatefulWidget {
   const TopUpScreen({
@@ -220,8 +219,9 @@ class _TopUpScreenState extends State<TopUpScreen>
                   TextField(
                     controller: _amount,
                     onChanged: (_) {
-                      if (_error == _invalidAmount)
+                      if (_error == _invalidAmount) {
                         setState(() => _error = null);
+                      }
                     },
                     keyboardType: TextInputType.number,
                     inputFormatters: [FilteringTextInputFormatter.digitsOnly],

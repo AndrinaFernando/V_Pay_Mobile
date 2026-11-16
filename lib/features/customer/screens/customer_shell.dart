@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/security/local_auth_service.dart';
+import '../../../core/widgets/navigation/vpay_tab_transition.dart';
 import '../../auth/auth_service.dart';
 import '../../auth/models/vpay_user_profile.dart';
+import '../../auth/services/user_api_service.dart';
 import '../../card/services/card_api_service.dart';
 import '../../customer_payment/models/customer_payment_result.dart';
 import '../../customer_payment/screens/customer_payment_preview_screen.dart';
 import '../../customer_payment/screens/customer_qr_scanner_screen.dart';
 import '../../customer_payment/services/customer_payment_confirmation_service.dart';
 import '../../customer_payment/services/customer_payment_preview_service.dart';
+import '../../profile/profile_screen.dart';
 import '../models/customer_transaction.dart';
 import '../services/customer_transaction_service.dart';
 import 'customer_activity_screen.dart';
@@ -23,6 +26,7 @@ class CustomerShell extends StatefulWidget {
     super.key,
     required this.profile,
     required this.authService,
+    this.userApiService,
     this.qrScannerBuilder,
     this.paymentPreviewService,
     this.paymentConfirmationService,
@@ -33,6 +37,7 @@ class CustomerShell extends StatefulWidget {
 
   final VPayUserProfile profile;
   final AuthService authService;
+  final UserApiService? userApiService;
   final CustomerQrScannerViewBuilder? qrScannerBuilder;
   final CustomerPaymentPreviewService? paymentPreviewService;
   final CustomerPaymentConfirmationService? paymentConfirmationService;
@@ -44,10 +49,16 @@ class CustomerShell extends StatefulWidget {
   State<CustomerShell> createState() => _CustomerShellState();
 }
 
-class _CustomerShellState extends State<CustomerShell> {
+class _CustomerShellState extends State<CustomerShell>
+    with SingleTickerProviderStateMixin {
+  late VPayUserProfile _profile;
   int _selectedIndex = 0;
+  late final AnimationController _tabAnimation = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+    value: 1,
+  );
   int _balanceRefreshTrigger = 0;
-  bool _isSigningOut = false;
   late final CustomerTransactionService _transactionService;
   late Future<List<CustomerTransaction>> _transactionsFuture;
   Future<void>? _transactionRefresh;
@@ -55,6 +66,7 @@ class _CustomerShellState extends State<CustomerShell> {
   @override
   void initState() {
     super.initState();
+    _profile = widget.profile;
     _transactionService =
         widget.transactionService ?? ApiCustomerTransactionService();
     _transactionsFuture = _transactionService.getTransactions();
@@ -90,29 +102,23 @@ class _CustomerShellState extends State<CustomerShell> {
     return tracked;
   }
 
-  void _selectTab(int index) {
-    final isEnteringActivity = index == 2 && _selectedIndex != 2;
-    setState(() => _selectedIndex = index);
-    if (isEnteringActivity) _refreshTransactions();
+  void _onProfileUpdated(VPayUserProfile profile) {
+    setState(() => _profile = profile);
   }
 
-  Future<void> _signOut() async {
-    if (_isSigningOut) return;
-    setState(() => _isSigningOut = true);
+  void _selectTab(int index) {
+    if (index == _selectedIndex) return;
+    final enteringActivity = index == 2;
+    setState(() => _selectedIndex = index);
+    if (enteringActivity) _refreshTransactions();
+    if (MediaQuery.disableAnimationsOf(context)) return;
+    _tabAnimation.forward(from: 0);
+  }
 
-    try {
-      await widget.authService.signOut();
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Unable to sign out. Please try again.'),
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isSigningOut = false);
-    }
+  @override
+  void dispose() {
+    _tabAnimation.dispose();
+    super.dispose();
   }
 
   Future<void> _openQrScanner() async {
@@ -146,31 +152,32 @@ class _CustomerShellState extends State<CustomerShell> {
       backgroundColor: Colors.white,
       body: SafeArea(
         bottom: false,
-        child: IndexedStack(
-          index: _selectedIndex,
-          children: [
-            CustomerHomeScreen(
-              profile: widget.profile,
-              cardApiService: widget.cardApiService,
-              onScanAndPay: _openQrScanner,
-              balanceRefreshTrigger: _balanceRefreshTrigger,
-              transactionsFuture: _transactionsFuture,
-              onRefreshTransactions: _refreshTransactions,
-            ),
-            _ScanAndPayTab(onScan: _openQrScanner),
-            CustomerActivityScreen(
-              transactionsFuture: _transactionsFuture,
-              onRefresh: _refreshTransactions,
-            ),
-            _ComingSoonTab(
-              icon: Icons.person_outline_rounded,
-              title: 'Profile',
-              footer: TextButton(
-                onPressed: _isSigningOut ? null : _signOut,
-                child: Text(_isSigningOut ? 'Signing out…' : 'Sign Out'),
+        child: VPayTabTransition(
+          animation: _tabAnimation,
+          child: IndexedStack(
+            index: _selectedIndex,
+            children: [
+              CustomerHomeScreen(
+                profile: _profile,
+                cardApiService: widget.cardApiService,
+                onScanAndPay: _openQrScanner,
+                balanceRefreshTrigger: _balanceRefreshTrigger,
+                transactionsFuture: _transactionsFuture,
+                onRefreshTransactions: _refreshTransactions,
               ),
-            ),
-          ],
+              _ScanAndPayTab(onScan: _openQrScanner),
+              CustomerActivityScreen(
+                transactionsFuture: _transactionsFuture,
+                onRefresh: _refreshTransactions,
+              ),
+              ProfileScreen(
+                profile: _profile,
+                authService: widget.authService,
+                userApiService: widget.userApiService,
+                onProfileUpdated: _onProfileUpdated,
+              ),
+            ],
+          ),
         ),
       ),
       bottomNavigationBar: DecoratedBox(
@@ -284,44 +291,6 @@ class _ScanAndPayTab extends StatelessWidget {
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ComingSoonTab extends StatelessWidget {
-  const _ComingSoonTab({required this.icon, required this.title, this.footer});
-
-  final IconData icon;
-  final String title;
-  final Widget? footer;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 44, color: _electric),
-            const SizedBox(height: 18),
-            Text(
-              title,
-              style: const TextStyle(
-                color: _ink,
-                fontSize: 24,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Coming soon',
-              style: TextStyle(color: _secondary, fontSize: 16),
-            ),
-            if (footer != null) ...[const SizedBox(height: 20), footer!],
-          ],
         ),
       ),
     );

@@ -47,7 +47,7 @@ Widget _app({
 );
 
 Future<void> _scrollToLogout(WidgetTester tester) async {
-  final logout = find.byKey(const Key('merchantLogoutButton'));
+  final logout = find.byKey(const Key('profileLogout'));
   await tester.scrollUntilVisible(
     logout,
     200,
@@ -58,6 +58,71 @@ Future<void> _scrollToLogout(WidgetTester tester) async {
 }
 
 void main() {
+  testWidgets('refresh updates both the header and account details', (
+    tester,
+  ) async {
+    var calls = 0;
+    const updated = VPayUserProfile(
+      uid: 'merchant-1',
+      name: 'Updated Contact',
+      email: 'updated@example.test',
+      role: 'MERCHANT',
+      status: 'PENDING',
+      businessName: 'Updated Cafe',
+    );
+    await tester.pumpWidget(
+      _app(
+        auth: _FakeAuthService(),
+        loadProfile: () async =>
+            UserProfileResult.found(++calls == 1 ? _merchant : updated),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.drag(
+      find.byKey(const Key('profileScrollView')),
+      const Offset(0, 350),
+    );
+    await tester.pumpAndSettle();
+    expect(calls, 2);
+    expect(find.text('Updated Contact'), findsOneWidget);
+    expect(find.text('Updated Cafe'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('profileAccountDetails')));
+    await tester.pumpAndSettle();
+    expect(find.text('updated@example.test'), findsOneWidget);
+    expect(find.text('PENDING'), findsOneWidget);
+  });
+
+  testWidgets(
+    'failed load can retry successfully and unavailable state permits logout',
+    (tester) async {
+      var calls = 0;
+      final auth = _FakeAuthService();
+      await tester.pumpWidget(
+        _app(
+          auth: auth,
+          loadProfile: () async {
+            calls++;
+            if (calls == 1) throw StateError('offline');
+            if (calls == 2) return UserProfileResult.found(_merchant);
+            return const UserProfileResult.missing();
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Retry'));
+      await tester.pumpAndSettle();
+      expect(find.text('Blue Cafe'), findsOneWidget);
+      await tester.tap(find.byTooltip('Refresh profile'));
+      await tester.pumpAndSettle();
+      expect(find.text('Profile details are unavailable.'), findsOneWidget);
+      await tester.tap(find.text('Log Out'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('logoutConfirmButton')));
+      await tester.pumpAndSettle();
+      expect(auth.signOutCalls, 1);
+    },
+  );
+
   testWidgets('renders merchant account and business fields from profile', (
     tester,
   ) async {
@@ -65,6 +130,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Blue Cafe'), findsWidgets);
+    await tester.tap(find.byKey(const Key('profileAccountDetails')));
+    await tester.pumpAndSettle();
     expect(find.text('Food & Beverage'), findsWidgets);
     expect(find.text('Amara Perera'), findsOneWidget);
     expect(find.text('amara@example.test'), findsOneWidget);
@@ -94,6 +161,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await tester.tap(find.byKey(const Key('profileAccountDetails')));
+    await tester.pumpAndSettle();
     expect(find.text('Not provided'), findsAtLeastNWidgets(1));
   });
 
@@ -102,14 +171,11 @@ void main() {
     await tester.pumpWidget(
       _app(auth: _FakeAuthService(), loadProfile: () => pending.future),
     );
-    expect(find.byKey(const Key('merchantProfileLoading')), findsOneWidget);
+    expect(find.byKey(const Key('profileLoading')), findsOneWidget);
 
     pending.complete(const UserProfileResult.missing());
     await tester.pumpAndSettle();
-    expect(
-      find.text('Merchant profile details are unavailable.'),
-      findsOneWidget,
-    );
+    expect(find.text('Profile details are unavailable.'), findsOneWidget);
   });
 
   testWidgets('shows a retry action when profile loading fails', (
@@ -126,8 +192,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('merchantProfileRetry')), findsOneWidget);
-    await tester.tap(find.byKey(const Key('merchantProfileRetry')));
+    expect(find.text('Retry'), findsOneWidget);
+    await tester.tap(find.text('Retry'));
     await tester.pumpAndSettle();
     expect(calls, 2);
   });
@@ -140,14 +206,14 @@ void main() {
     await tester.pumpAndSettle();
 
     await _scrollToLogout(tester);
-    await tester.tap(find.byKey(const Key('merchantLogoutButton')));
+    await tester.tap(find.byKey(const Key('profileLogout')));
     await tester.pumpAndSettle();
     expect(find.text('Log out?'), findsOneWidget);
     expect(auth.signOutCalls, 0);
-    await tester.tap(find.byKey(const Key('merchantLogoutCancel')));
+    await tester.tap(find.byKey(const Key('logoutCancelButton')));
     await tester.pumpAndSettle();
     expect(auth.signOutCalls, 0);
-    expect(find.text('Blue Cafe'), findsOneWidget);
+    expect(find.byKey(const Key('profileScrollView')), findsOneWidget);
   });
 
   testWidgets('confirmed logout calls the shared sign-out service', (
@@ -158,9 +224,9 @@ void main() {
     await tester.pumpAndSettle();
 
     await _scrollToLogout(tester);
-    await tester.tap(find.byKey(const Key('merchantLogoutButton')));
+    await tester.tap(find.byKey(const Key('profileLogout')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('merchantLogoutConfirm')));
+    await tester.tap(find.byKey(const Key('logoutConfirmButton')));
     await tester.pump();
 
     expect(auth.signOutCalls, 1);
@@ -174,13 +240,13 @@ void main() {
     await tester.pumpAndSettle();
 
     await _scrollToLogout(tester);
-    await tester.tap(find.byKey(const Key('merchantLogoutButton')));
+    await tester.tap(find.byKey(const Key('profileLogout')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('merchantLogoutConfirm')));
+    await tester.tap(find.byKey(const Key('logoutConfirmButton')));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('merchantLogoutError')), findsOneWidget);
-    expect(find.text('Blue Cafe'), findsOneWidget);
-    expect(find.byKey(const Key('merchantLogoutButton')), findsOneWidget);
+    expect(find.text('Unable to log out. Please try again.'), findsOneWidget);
+    expect(find.byKey(const Key('profileScrollView')), findsOneWidget);
+    expect(find.byKey(const Key('profileLogout')), findsOneWidget);
   });
 }

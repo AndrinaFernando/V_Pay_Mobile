@@ -6,17 +6,19 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'core/notifications/firebase_notifications.dart';
 
 import 'features/auth/auth_gate.dart';
+import 'features/auth/screens/vpay_startup_screen.dart';
 import 'firebase_options.dart';
 
-Future<void> main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  runApp(const MyApp());
+}
 
+Future<void> _initializeFirebase() async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
     FirebaseMessaging.onBackgroundMessage(vpayBackgroundMessage);
   }
-
-  runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
@@ -26,7 +28,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'VPay',
       theme: ThemeData(
         // This is the theme of your application.
         //
@@ -43,9 +45,12 @@ class MyApp extends StatelessWidget {
         //
         // This works for code too, not just values: Most code changes can be
         // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: .fromSeed(seedColor: const Color(0xFF0072DC)),
       ),
-      home: const AuthGate(),
+      home: VPayStartupGate(
+        initialize: _initializeFirebase,
+        child: const AuthGate(),
+      ),
     );
   }
 }

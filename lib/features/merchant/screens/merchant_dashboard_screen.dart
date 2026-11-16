@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/network/api_exception.dart';
+import '../../../core/widgets/navigation/vpay_tab_transition.dart';
 import '../../auth/auth_service.dart';
 import '../../auth/models/vpay_user_profile.dart';
 import '../../auth/models/user_profile_result.dart';
@@ -34,6 +35,7 @@ class MerchantDashboardScreen extends StatefulWidget {
     this.onCreatePaymentRequest,
     this.loadProfile,
     this.paymentIntentService,
+    this.userApiService,
     this.merchantBalanceService,
     this.merchantReceivedPaymentsService,
   });
@@ -43,6 +45,7 @@ class MerchantDashboardScreen extends StatefulWidget {
   final VoidCallback? onCreatePaymentRequest;
   final Future<UserProfileResult> Function()? loadProfile;
   final PaymentIntentService? paymentIntentService;
+  final UserApiService? userApiService;
   final MerchantBalanceService? merchantBalanceService;
   final MerchantReceivedPaymentsService? merchantReceivedPaymentsService;
 
@@ -52,8 +55,14 @@ class MerchantDashboardScreen extends StatefulWidget {
 }
 
 class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
-    with WidgetsBindingObserver {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   int _selectedNavigationIndex = 0;
+  bool _profileVisited = false;
+  late final AnimationController _tabAnimation = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+    value: 1,
+  );
   late VPayUserProfile _profile = widget.profile;
   bool _isRefreshingProfile = false;
   String? _profileRefreshError;
@@ -85,6 +94,7 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _tabAnimation.dispose();
     super.dispose();
   }
 
@@ -95,6 +105,16 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
       unawaited(_loadBalance());
       unawaited(_loadReceivedPayments());
     }
+  }
+
+  void _selectVisibleTab(int index) {
+    if (index == _selectedNavigationIndex) return;
+    setState(() {
+      _selectedNavigationIndex = index;
+      if (index == 3) _profileVisited = true;
+    });
+    if (MediaQuery.disableAnimationsOf(context)) return;
+    _tabAnimation.forward(from: 0);
   }
 
   String get _headerBusinessName {
@@ -296,16 +316,16 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
       return;
     }
     if (index == 3) {
-      setState(() => _selectedNavigationIndex = index);
+      _selectVisibleTab(index);
       return;
     }
     if (index == 2) {
-      setState(() => _selectedNavigationIndex = index);
+      _selectVisibleTab(index);
       unawaited(_loadReceivedPayments());
       return;
     }
     if (index == 0) {
-      setState(() => _selectedNavigationIndex = 0);
+      _selectVisibleTab(0);
       unawaited(_refreshMerchantData());
       return;
     }
@@ -321,6 +341,8 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
           profile: _profile,
           authService: authService,
           loadProfile: widget.loadProfile,
+          userApiService: widget.userApiService,
+          onProfileUpdated: (profile) => setState(() => _profile = profile),
         ),
       ),
     );
@@ -335,11 +357,21 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
         backgroundColor: _canvas,
         body: SafeArea(
           bottom: false,
-          child: switch (_selectedNavigationIndex) {
-            2 => _buildPaymentsTab(),
-            3 => _buildProfileTab(),
-            _ => _buildDashboardTab(),
-          },
+          child: VPayTabTransition(
+            animation: _tabAnimation,
+            child: IndexedStack(
+              index: switch (_selectedNavigationIndex) {
+                2 => 1,
+                3 => 2,
+                _ => 0,
+              },
+              children: [
+                _buildDashboardTab(),
+                _buildPaymentsTab(),
+                _profileVisited ? _buildProfileTab() : const SizedBox.shrink(),
+              ],
+            ),
+          ),
         ),
         bottomNavigationBar: _buildBottomNavigationBar(),
       ),
@@ -406,8 +438,10 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
       profile: _profile,
       authService: authService,
       loadProfile: widget.loadProfile,
+      userApiService: widget.userApiService,
+      onProfileUpdated: (profile) => setState(() => _profile = profile),
       onBack: () {
-        setState(() => _selectedNavigationIndex = 0);
+        _selectVisibleTab(0);
         unawaited(_refreshMerchantData());
       },
     );
@@ -661,7 +695,7 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
             ),
             TextButton(
               key: const Key('viewAllMerchantPayments'),
-              onPressed: () => setState(() => _selectedNavigationIndex = 2),
+              onPressed: () => _onNavigationSelected(2),
               child: const Text('View all'),
             ),
           ],

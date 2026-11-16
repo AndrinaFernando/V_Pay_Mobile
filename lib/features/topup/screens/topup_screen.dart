@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import '../../../core/widgets/loading/vpay_loading.dart';
+
 import 'package:flutter/services.dart';
 
 import '../../../core/network/api_exception.dart';
@@ -217,6 +220,8 @@ class _TopUpScreenState extends State<TopUpScreen> {
                 ],
               ),
             ),
+            if (_busy)
+              const VPayProcessingIndicator(label: 'Starting checkout'),
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
               child: SizedBox(

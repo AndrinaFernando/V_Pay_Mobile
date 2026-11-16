@@ -42,9 +42,16 @@ class _TopUpHistoryScreenState extends State<TopUpHistoryScreen> {
             if (item.amount != null) Text('Final amount: Rs. ${item.amount}'),
             const SizedBox(height: 8),
             SelectableText('Reference: ${item.id}'),
-            if (item.message != null) ...[
+            if (item.status == 'START_UNKNOWN') ...[
               const SizedBox(height: 8),
-              Text(item.message!),
+              const Text(
+                'We couldn’t confirm if this top-up started. Please contact support before trying again.',
+              ),
+            ] else if (item.status == 'START_FAILED') ...[
+              const SizedBox(height: 8),
+              const Text(
+                'We couldn’t start this top-up. Please try again later.',
+              ),
             ],
           ],
         ),

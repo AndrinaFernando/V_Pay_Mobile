@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/widgets/navigation/vpay_tab_transition.dart';
 import '../../auth/auth_service.dart';
 import '../../auth/models/vpay_user_profile.dart';
 import '../../auth/models/user_profile_result.dart';
@@ -41,11 +42,34 @@ class MerchantDashboardScreen extends StatefulWidget {
       _MerchantDashboardScreenState();
 }
 
-class _MerchantDashboardScreenState extends State<MerchantDashboardScreen> {
+class _MerchantDashboardScreenState extends State<MerchantDashboardScreen>
+    with SingleTickerProviderStateMixin {
   int _selectedNavigationIndex = 0;
+  bool _profileVisited = false;
+  late final AnimationController _tabAnimation = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+    value: 1,
+  );
   late VPayUserProfile _profile = widget.profile;
   bool _isRefreshingProfile = false;
   String? _profileRefreshError;
+
+  @override
+  void dispose() {
+    _tabAnimation.dispose();
+    super.dispose();
+  }
+
+  void _selectVisibleTab(int index) {
+    if (index == _selectedNavigationIndex) return;
+    setState(() {
+      _selectedNavigationIndex = index;
+      if (index == 3) _profileVisited = true;
+    });
+    if (MediaQuery.disableAnimationsOf(context)) return;
+    _tabAnimation.forward(from: 0);
+  }
 
   String get _headerBusinessName {
     final businessName = _profile.businessName?.trim();
@@ -126,11 +150,11 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen> {
       return;
     }
     if (index == 3) {
-      setState(() => _selectedNavigationIndex = index);
+      _selectVisibleTab(index);
       return;
     }
     if (index == 0) {
-      setState(() => _selectedNavigationIndex = 0);
+      _selectVisibleTab(0);
       return;
     }
     setState(() => _selectedNavigationIndex = 0);
@@ -167,9 +191,16 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen> {
         backgroundColor: _canvas,
         body: SafeArea(
           bottom: false,
-          child: _selectedNavigationIndex == 3
-              ? _buildProfileTab()
-              : _buildDashboardTab(),
+          child: VPayTabTransition(
+            animation: _tabAnimation,
+            child: IndexedStack(
+              index: _selectedNavigationIndex == 3 ? 1 : 0,
+              children: [
+                _buildDashboardTab(),
+                _profileVisited ? _buildProfileTab() : const SizedBox.shrink(),
+              ],
+            ),
+          ),
         ),
         bottomNavigationBar: _buildBottomNavigationBar(),
       ),
@@ -233,7 +264,7 @@ class _MerchantDashboardScreenState extends State<MerchantDashboardScreen> {
       loadProfile: widget.loadProfile,
       userApiService: widget.userApiService,
       onProfileUpdated: (profile) => setState(() => _profile = profile),
-      onBack: () => setState(() => _selectedNavigationIndex = 0),
+      onBack: () => _selectVisibleTab(0),
     );
   }
 

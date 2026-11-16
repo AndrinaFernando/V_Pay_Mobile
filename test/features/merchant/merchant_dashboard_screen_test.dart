@@ -7,6 +7,7 @@ import 'package:vpay_mobile/features/auth/models/vpay_user_profile.dart';
 import 'package:vpay_mobile/features/merchant/screens/merchant_dashboard_screen.dart';
 import 'package:vpay_mobile/features/merchant/services/payment_intent_service.dart';
 import 'package:vpay_mobile/features/profile/profile_screen.dart';
+import 'package:vpay_mobile/core/widgets/navigation/vpay_tab_transition.dart';
 
 const _merchantProfile = VPayUserProfile(
   uid: 'merchant-uid',
@@ -29,6 +30,72 @@ class _FakePaymentIntentService implements PaymentIntentService {
 }
 
 void main() {
+  testWidgets(
+    'merchant transition preserves dashboard scroll and profile tab',
+    (tester) async {
+      var loads = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MerchantDashboardScreen(
+            profile: _merchantProfile,
+            authService: _FakeAuthService(),
+            loadProfile: () async {
+              loads++;
+              return UserProfileResult.found(_merchantProfile);
+            },
+          ),
+        ),
+      );
+      await tester.drag(
+        find.byType(SingleChildScrollView),
+        const Offset(0, -280),
+      );
+      await tester.pumpAndSettle();
+      final before = tester
+          .state<ScrollableState>(
+            find
+                .descendant(
+                  of: find.byType(SingleChildScrollView),
+                  matching: find.byType(Scrollable),
+                )
+                .first,
+          )
+          .position
+          .pixels;
+      expect(before, greaterThan(0));
+      await tester.tap(find.text('Profile').last);
+      await tester.pumpAndSettle();
+      expect(find.byType(VPayTabTransition), findsOneWidget);
+      expect(find.byType(ProfileScreen), findsOneWidget);
+      expect(loads, 1);
+      await tester.tap(find.text('Dashboard').last);
+      await tester.tap(find.text('Profile').last);
+      await tester.pumpAndSettle();
+      expect(loads, 1);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<BottomNavigationBar>(find.byType(BottomNavigationBar))
+            .currentIndex,
+        0,
+      );
+      final after = tester
+          .state<ScrollableState>(
+            find
+                .descendant(
+                  of: find.byType(SingleChildScrollView),
+                  matching: find.byType(Scrollable),
+                )
+                .first,
+          )
+          .position
+          .pixels;
+      expect(after, before);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   test('profile parses the backend business name when present', () {
     final profile = VPayUserProfile.fromJson({
       'uid': 'merchant-uid',

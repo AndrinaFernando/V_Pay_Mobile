@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/navigation/vpay_tab_transition.dart';
 import '../../auth/auth_service.dart';
 import '../../auth/models/vpay_user_profile.dart';
 import '../../auth/services/user_api_service.dart';
@@ -26,9 +27,15 @@ class CustomerShell extends StatefulWidget {
   State<CustomerShell> createState() => _CustomerShellState();
 }
 
-class _CustomerShellState extends State<CustomerShell> {
+class _CustomerShellState extends State<CustomerShell>
+    with SingleTickerProviderStateMixin {
   late VPayUserProfile _profile;
   int _selectedIndex = 0;
+  late final AnimationController _tabAnimation = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+    value: 1,
+  );
 
   @override
   void initState() {
@@ -40,31 +47,47 @@ class _CustomerShellState extends State<CustomerShell> {
     setState(() => _profile = profile);
   }
 
+  void _selectTab(int index) {
+    if (index == _selectedIndex) return;
+    setState(() => _selectedIndex = index);
+    if (MediaQuery.disableAnimationsOf(context)) return;
+    _tabAnimation.forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _tabAnimation.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
         bottom: false,
-        child: IndexedStack(
-          index: _selectedIndex,
-          children: [
-            CustomerHomeScreen(profile: _profile),
-            const _ComingSoonTab(
-              icon: Icons.qr_code_scanner_rounded,
-              title: 'Scan & Pay',
-            ),
-            const _ComingSoonTab(
-              icon: Icons.receipt_long_outlined,
-              title: 'Activity',
-            ),
-            ProfileScreen(
-              profile: _profile,
-              authService: widget.authService,
-              userApiService: widget.userApiService,
-              onProfileUpdated: _onProfileUpdated,
-            ),
-          ],
+        child: VPayTabTransition(
+          animation: _tabAnimation,
+          child: IndexedStack(
+            index: _selectedIndex,
+            children: [
+              CustomerHomeScreen(profile: _profile),
+              const _ComingSoonTab(
+                icon: Icons.qr_code_scanner_rounded,
+                title: 'Scan & Pay',
+              ),
+              const _ComingSoonTab(
+                icon: Icons.receipt_long_outlined,
+                title: 'Activity',
+              ),
+              ProfileScreen(
+                profile: _profile,
+                authService: widget.authService,
+                userApiService: widget.userApiService,
+                onProfileUpdated: _onProfileUpdated,
+              ),
+            ],
+          ),
         ),
       ),
       bottomNavigationBar: DecoratedBox(
@@ -74,7 +97,7 @@ class _CustomerShellState extends State<CustomerShell> {
         ),
         child: BottomNavigationBar(
           currentIndex: _selectedIndex,
-          onTap: (index) => setState(() => _selectedIndex = index),
+          onTap: _selectTab,
           type: BottomNavigationBarType.fixed,
           backgroundColor: Colors.white,
           elevation: 0,

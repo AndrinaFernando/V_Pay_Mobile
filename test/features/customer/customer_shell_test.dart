@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vpay_mobile/features/auth/auth_service.dart';
 import 'package:vpay_mobile/features/auth/models/vpay_user_profile.dart';
 import 'package:vpay_mobile/features/customer/screens/customer_shell.dart';
+import 'package:vpay_mobile/core/widgets/navigation/vpay_tab_transition.dart';
 
 const _customerProfile = VPayUserProfile(
   uid: 'cust-1',
@@ -27,6 +28,89 @@ class _FakeAuthService implements AuthService {
 }
 
 void main() {
+  testWidgets('reduced motion switches tabs without a fade', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(disableAnimations: true),
+          child: CustomerShell(
+            profile: _customerProfile,
+            authService: _FakeAuthService(),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Profile').last);
+    await tester.pump();
+    expect(find.byType(VPayTabTransition), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(VPayTabTransition),
+        matching: find.byType(FadeTransition),
+      ),
+      findsNothing,
+    );
+    expect(find.byKey(const Key('profileName')), findsOneWidget);
+  });
+
+  testWidgets(
+    'tab fade preserves Home scroll and selected state after rapid taps',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: CustomerShell(
+            profile: _customerProfile,
+            authService: _FakeAuthService(),
+          ),
+        ),
+      );
+      final homeScroll = find.byType(SingleChildScrollView).first;
+      await tester.drag(homeScroll, const Offset(0, -300));
+      await tester.pumpAndSettle();
+      final offset = tester
+          .state<ScrollableState>(
+            find
+                .descendant(of: homeScroll, matching: find.byType(Scrollable))
+                .first,
+          )
+          .position
+          .pixels;
+      expect(offset, greaterThan(0));
+      await tester.tap(find.text('Profile').last);
+      await tester.pump();
+      expect(find.byType(VPayTabTransition), findsOneWidget);
+      final fade = tester.widget<FadeTransition>(
+        find.descendant(
+          of: find.byType(VPayTabTransition),
+          matching: find.byType(FadeTransition),
+        ),
+      );
+      expect(fade.opacity.value, lessThan(1));
+      await tester.tap(find.text('Activity').last);
+      await tester.tap(find.text('Home').last);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<BottomNavigationBar>(find.byType(BottomNavigationBar))
+            .currentIndex,
+        0,
+      );
+      final restored = tester
+          .state<ScrollableState>(
+            find
+                .descendant(
+                  of: find.byType(SingleChildScrollView).first,
+                  matching: find.byType(Scrollable),
+                )
+                .first,
+          )
+          .position
+          .pixels;
+      expect(restored, offset);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('customer shell has Home, Scan & Pay, Activity, Profile tabs', (
     tester,
   ) async {

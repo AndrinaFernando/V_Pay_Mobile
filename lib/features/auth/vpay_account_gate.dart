@@ -1,6 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+
+import '../../core/notifications/firebase_notifications.dart';
+import '../../core/notifications/notification_service.dart';
 
 import '../../core/network/api_exception.dart';
+import '../../core/notifications/notification_scope.dart';
+import '../../core/notifications/notification_open_coordinator.dart';
 import '../customer/screens/customer_shell.dart';
 import '../merchant/screens/merchant_dashboard_screen.dart';
 import 'app_access_gate.dart';
@@ -15,10 +21,12 @@ class VPayAccountGate extends StatefulWidget {
     super.key,
     required this.authService,
     this.userApiService,
+    this.notificationOpens,
   });
 
   final AuthService authService;
   final UserApiService? userApiService;
+  final NotificationOpenCoordinator? notificationOpens;
 
   @override
   State<VPayAccountGate> createState() => _VPayAccountGateState();
@@ -27,6 +35,15 @@ class VPayAccountGate extends StatefulWidget {
 class _VPayAccountGateState extends State<VPayAccountGate> {
   late final UserApiService _userApiService;
   late Future<UserProfileResult> _profileCheck;
+  NotificationService? _notifications;
+  NotificationService _notificationService(AuthService auth) =>
+      _notifications ??= firebaseNotificationService(auth);
+
+  @override
+  void dispose() {
+    _notifications?.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -67,20 +84,30 @@ class _VPayAccountGateState extends State<VPayAccountGate> {
           final profile = result!.user!;
           return AppAccessGate(
             authService: widget.authService,
-            child: switch (profile.role) {
-              'CUSTOMER' => CustomerShell(
-                profile: profile,
-                authService: widget.authService,
-              ),
-              'MERCHANT' => MerchantDashboardScreen(
-                profile: profile,
-                authService: widget.authService,
-                loadProfile: _userApiService.getCurrentUserProfile,
-              ),
-              _ => AuthenticatedPlaceholderScreen(
-                authService: widget.authService,
-              ),
-            },
+            child: NotificationScope(
+              auth: widget.authService,
+              role: profile.role,
+              opens: widget.notificationOpens,
+              retainService: true,
+              serviceFactory:
+                  !kIsWeb && defaultTargetPlatform == TargetPlatform.android
+                  ? _notificationService
+                  : null,
+              child: switch (profile.role) {
+                'CUSTOMER' => CustomerShell(
+                  profile: profile,
+                  authService: widget.authService,
+                ),
+                'MERCHANT' => MerchantDashboardScreen(
+                  profile: profile,
+                  authService: widget.authService,
+                  loadProfile: _userApiService.getCurrentUserProfile,
+                ),
+                _ => AuthenticatedPlaceholderScreen(
+                  authService: widget.authService,
+                ),
+              },
+            ),
           );
         }
 

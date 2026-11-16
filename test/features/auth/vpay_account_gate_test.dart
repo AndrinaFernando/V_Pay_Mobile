@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vpay_mobile/core/notifications/notification_scope.dart';
 import 'package:vpay_mobile/features/auth/app_access_gate.dart';
 import 'package:vpay_mobile/features/auth/auth_service.dart';
 import 'package:vpay_mobile/features/auth/models/user_profile_result.dart';
@@ -49,7 +50,9 @@ Future<Widget> _buildRoleGate(WidgetTester tester, String role) async {
   await tester.pump();
 
   final gate = tester.widget<AppAccessGate>(find.byType(AppAccessGate));
-  return gate.child;
+  final scope = gate.child as NotificationScope;
+  expect(scope.role, role);
+  return scope.child;
 }
 
 void main() {
@@ -88,7 +91,9 @@ void main() {
     await tester.pump();
 
     final accessGate = tester.widget<AppAccessGate>(find.byType(AppAccessGate));
-    final dashboard = accessGate.child as MerchantDashboardScreen;
+    final scope = accessGate.child as NotificationScope;
+    expect(scope.auth, same(authService));
+    final dashboard = scope.child as MerchantDashboardScreen;
     expect(dashboard.authService, same(authService));
     expect(dashboard.loadProfile, isNotNull);
   });

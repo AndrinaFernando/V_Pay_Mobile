@@ -67,7 +67,7 @@ class CustomerActivityScreen extends StatelessWidget {
                         child: _ActivityMessage(
                           icon: Icons.receipt_long_outlined,
                           title: 'No payment activity yet',
-                          message: 'Completed QR payments will appear here.',
+                          message: 'QR payments and top-ups will appear here.',
                         ),
                       ),
                     ],

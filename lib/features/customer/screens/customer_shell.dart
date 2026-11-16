@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../../core/security/local_auth_service.dart';
@@ -12,7 +14,9 @@ import '../../customer_payment/screens/customer_qr_scanner_screen.dart';
 import '../../customer_payment/services/customer_payment_confirmation_service.dart';
 import '../../customer_payment/services/customer_payment_preview_service.dart';
 import '../../profile/profile_screen.dart';
+import '../../topup/services/topup_service.dart';
 import '../models/customer_transaction.dart';
+import '../services/customer_activity_service.dart';
 import '../services/customer_transaction_service.dart';
 import 'customer_activity_screen.dart';
 import 'customer_home_screen.dart';
@@ -33,6 +37,7 @@ class CustomerShell extends StatefulWidget {
     this.localAuthService,
     this.cardApiService,
     this.transactionService,
+    this.topUpService,
   });
 
   final VPayUserProfile profile;
@@ -44,6 +49,7 @@ class CustomerShell extends StatefulWidget {
   final LocalAuthService? localAuthService;
   final CardApiService? cardApiService;
   final CustomerTransactionService? transactionService;
+  final TopUpService? topUpService;
 
   @override
   State<CustomerShell> createState() => _CustomerShellState();
@@ -62,13 +68,20 @@ class _CustomerShellState extends State<CustomerShell>
   late final CustomerTransactionService _transactionService;
   late Future<List<CustomerTransaction>> _transactionsFuture;
   Future<void>? _transactionRefresh;
+  Timer? _pendingConfirmationRefresh;
 
   @override
   void initState() {
     super.initState();
     _profile = widget.profile;
     _transactionService =
-        widget.transactionService ?? ApiCustomerTransactionService();
+        widget.transactionService != null && widget.topUpService == null
+        ? widget.transactionService!
+        : CustomerActivityService(
+            payments:
+                widget.transactionService ?? ApiCustomerTransactionService(),
+            topUps: widget.topUpService ?? ApiTopUpService(),
+          );
     _transactionsFuture = _transactionService.getTransactions();
     _trackTransactionRequest(_transactionsFuture);
   }
@@ -76,6 +89,22 @@ class _CustomerShellState extends State<CustomerShell>
   void _handlePaymentSuccess(CustomerPaymentResult _) {
     setState(() => _balanceRefreshTrigger++);
     _refreshTransactions();
+  }
+
+  Future<void> _refreshAfterTopUp(bool pending) async {
+    if (!mounted) return;
+    setState(() => _balanceRefreshTrigger++);
+    await _refreshTransactions();
+    if (pending) {
+      // A callback may commit shortly after checkout is closed. This single
+      // retry complements notification and pull-to-refresh recovery.
+      _pendingConfirmationRefresh?.cancel();
+      _pendingConfirmationRefresh = Timer(const Duration(seconds: 8), () {
+        if (!mounted) return;
+        setState(() => _balanceRefreshTrigger++);
+        unawaited(_refreshTransactions());
+      });
+    }
   }
 
   Future<void> _refreshTransactions() {
@@ -117,6 +146,7 @@ class _CustomerShellState extends State<CustomerShell>
 
   @override
   void dispose() {
+    _pendingConfirmationRefresh?.cancel();
     _tabAnimation.dispose();
     super.dispose();
   }
@@ -164,6 +194,8 @@ class _CustomerShellState extends State<CustomerShell>
                 balanceRefreshTrigger: _balanceRefreshTrigger,
                 transactionsFuture: _transactionsFuture,
                 onRefreshTransactions: _refreshTransactions,
+                onTopUpReturned: _refreshAfterTopUp,
+                topUpService: widget.topUpService,
               ),
               _ScanAndPayTab(onScan: _openQrScanner),
               CustomerActivityScreen(

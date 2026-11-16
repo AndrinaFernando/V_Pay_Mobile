@@ -10,6 +10,7 @@ import '../../auth/models/vpay_user_profile.dart';
 import '../../card/models/vpay_card.dart';
 import '../../card/services/card_api_service.dart';
 import '../../topup/screens/topup_screen.dart';
+import '../../topup/services/topup_service.dart';
 import '../models/customer_transaction.dart';
 import '../widgets/customer_transaction_tile.dart';
 
@@ -32,6 +33,8 @@ class CustomerHomeScreen extends StatefulWidget {
     this.balanceRefreshTrigger = 0,
     this.transactionsFuture,
     this.onRefreshTransactions,
+    this.onTopUpReturned,
+    this.topUpService,
   });
 
   final VPayUserProfile profile;
@@ -40,6 +43,8 @@ class CustomerHomeScreen extends StatefulWidget {
   final int balanceRefreshTrigger;
   final Future<List<CustomerTransaction>>? transactionsFuture;
   final Future<void> Function()? onRefreshTransactions;
+  final Future<void> Function(bool pending)? onTopUpReturned;
+  final TopUpService? topUpService;
 
   @override
   State<CustomerHomeScreen> createState() => _CustomerHomeScreenState();
@@ -86,10 +91,21 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
   }
 
   Future<void> _openTopUp() async {
-    final result = await Navigator.of(context)
-        .push(MaterialPageRoute<String>(builder: (_) => const TopUpScreen()));
+    final result = await Navigator.of(context).push(
+      MaterialPageRoute<String>(
+        builder: (_) => TopUpScreen(service: widget.topUpService),
+      ),
+    );
     if (!mounted) return;
-    _retry();
+    if (widget.onTopUpReturned != null) {
+      await widget.onTopUpReturned!(
+        result == null || result == 'Waiting for payment confirmation',
+      );
+    } else {
+      _retry();
+      await widget.onRefreshTransactions?.call();
+    }
+    if (!mounted) return;
     if (result != null) {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(result)));

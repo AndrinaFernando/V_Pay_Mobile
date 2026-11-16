@@ -25,6 +25,7 @@ class _RupioCheckoutScreenState extends State<RupioCheckoutScreen> {
   late final WebViewController _controller;
   Timer? _timer;
   bool _checking = false;
+  bool _completed = false;
   bool _loading = true;
   String? _error;
 
@@ -70,12 +71,13 @@ class _RupioCheckoutScreenState extends State<RupioCheckoutScreen> {
   }
 
   void _schedule() {
+    if (_completed) return;
     _timer?.cancel();
     _timer = Timer(const Duration(seconds: 5), _checkStatus);
   }
 
   Future<void> _checkStatus() async {
-    if (_checking) return;
+    if (_checking || _completed) return;
     _checking = true;
     try {
       final result = await widget.service.get(widget.topUpId);
@@ -86,6 +88,7 @@ class _RupioCheckoutScreenState extends State<RupioCheckoutScreen> {
         'CANCELLED',
         'TIMEOUT',
       }.contains(result.status)) {
+        _completed = true;
         Navigator.of(context).pop(result);
         return;
       }

@@ -86,7 +86,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Colombo Cafe'), findsOneWidget);
-    expect(find.text('Rs. 12.50'), findsOneWidget);
+    expect(find.text('-Rs. 12.50'), findsOneWidget);
     expect(find.text('SUCCESS'), findsOneWidget);
 
     await tester.pumpWidget(

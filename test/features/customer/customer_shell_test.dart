@@ -5,6 +5,7 @@ import 'package:vpay_mobile/features/auth/auth_service.dart';
 import 'package:vpay_mobile/features/auth/models/vpay_user_profile.dart';
 import 'package:vpay_mobile/features/customer/screens/customer_shell.dart';
 import 'package:vpay_mobile/core/widgets/navigation/vpay_tab_transition.dart';
+import 'package:vpay_mobile/features/topup/services/topup_service.dart';
 
 import '../../support/fake_dashboard_services.dart';
 
@@ -29,6 +30,19 @@ class _FakeAuthService implements AuthService {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+class _FakeTopUps implements TopUpService {
+  int requests = 0;
+  @override
+  Future<TopUp> create(int amount) => throw UnimplementedError();
+  @override
+  Future<TopUp> get(String id) => throw UnimplementedError();
+  @override
+  Future<List<TopUp>> list() async {
+    requests++;
+    return const [];
+  }
+}
+
 CustomerShell _shell(AuthService auth) => CustomerShell(
   profile: _customerProfile,
   authService: auth,
@@ -37,6 +51,44 @@ CustomerShell _shell(AuthService auth) => CustomerShell(
 );
 
 void main() {
+  testWidgets(
+    'returning from Top Up refreshes balance and both activity APIs',
+    (tester) async {
+      final card = FakeDashboardCardService();
+      final payments = FakeDashboardTransactionService();
+      final topUps = _FakeTopUps();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: CustomerShell(
+            profile: _customerProfile,
+            authService: _FakeAuthService(),
+            cardApiService: card,
+            transactionService: payments,
+            topUpService: topUps,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect((card.requests, payments.requests, topUps.requests), (1, 1, 1));
+      await tester.ensureVisible(find.text('Top Up').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Top Up').last);
+      await tester.pumpAndSettle();
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect((card.requests, payments.requests, topUps.requests), (2, 2, 2));
+      await tester.tap(find.text('Activity').last);
+      await tester.pumpAndSettle();
+      expect((payments.requests, topUps.requests), (3, 3));
+      final refresh = tester.state<RefreshIndicatorState>(
+        find.byKey(const ValueKey('customerActivityRefreshIndicator')),
+      ).show();
+      await tester.pumpAndSettle();
+      await refresh;
+      expect((payments.requests, topUps.requests), (4, 4));
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
   testWidgets('reduced motion switches tabs without a fade', (tester) async {
     await tester.pumpWidget(
       MaterialApp(

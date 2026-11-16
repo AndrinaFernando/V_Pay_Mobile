@@ -81,7 +81,6 @@ class _NotificationScopeState extends State<NotificationScope>
   void _refresh() {
     if (!mounted) return;
     // Recreate the existing role home, which loads authoritative API data.
-    Navigator.of(context).popUntil((route) => route.isFirst);
     setState(() => _revision++);
   }
 

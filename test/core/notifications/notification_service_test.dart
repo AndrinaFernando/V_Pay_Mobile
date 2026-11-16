@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:vpay_mobile/core/network/api_client.dart';
 import 'package:vpay_mobile/core/notifications/notification_service.dart';
+import 'package:vpay_mobile/core/notifications/notification_binding.dart';
 import 'package:vpay_mobile/features/auth/auth_service.dart';
 
 class FakeAuth implements AuthService {
@@ -12,8 +13,10 @@ class FakeAuth implements AuthService {
 }
 
 class FakeClient extends ApiClient {
-  FakeClient(this.status, {this.body = '{"success":true}'})
-    : super(authService: FakeAuth());
+  FakeClient(
+    this.status, {
+    this.body = '{"success":true,"data":{"bindingId":"12345678-1234-4123-8123-123456789abc"}}',
+  }) : super(authService: FakeAuth());
   final int status;
   final String body;
   Object? requestBody;
@@ -26,6 +29,43 @@ class FakeClient extends ApiClient {
 }
 
 void main() {
+  test('binding rejects stale account and stale registration', () {
+    NotificationBinding.set('customer', 'token', 'binding-1');
+    expect(NotificationBinding.matches('customer', 'binding-1'), isTrue);
+    expect(NotificationBinding.matches('merchant', 'binding-1'), isFalse);
+    expect(NotificationBinding.matches('customer', 'binding-2'), isFalse);
+    NotificationBinding.clear();
+    expect(NotificationBinding.matches('customer', 'binding-1'), isFalse);
+  });
+  test(
+    'foreground service ignores another binding even with a known type',
+    () async {
+      NotificationBinding.set('customer', 'token', 'current');
+      final messages = StreamController<Object?>();
+      final received = <NotificationType>[];
+      final service = NotificationService(
+        requestPermission: () async => true,
+        getToken: () async => 'token',
+        tokenChanges: const Stream.empty(),
+        foregroundMessages: messages.stream,
+        openedMessages: const Stream.empty(),
+        initialMessage: () async => null,
+        isCurrentSession: () => true,
+        registerToken: (_) async => RegistrationResult.registered,
+        acceptMessage: (value) =>
+            value is Map &&
+            NotificationBinding.matches('customer', value['bindingId']),
+      );
+      await service.start(onMessage: (type, _) => received.add(type));
+      messages.add({'type': 'PAYMENT_SUCCESS', 'bindingId': 'old'});
+      messages.add({'type': 'TOP_UP_SUCCESS', 'bindingId': 'current'});
+      await Future<void>.delayed(Duration.zero);
+      expect(received, [NotificationType.topUpSuccess]);
+      service.dispose();
+      NotificationBinding.clear();
+      await messages.close();
+    },
+  );
   test(
     'registers token through the existing authenticated API client',
     () async {
@@ -52,6 +92,13 @@ void main() {
   test('malformed response fails safely', () async {
     expect(
       await NotificationTokenApi(FakeClient(200, body: 'invalid'))
+          .register('fake'),
+      RegistrationResult.failed,
+    );
+  });
+  test('registration without a valid binding is rejected', () async {
+    expect(
+      await NotificationTokenApi(FakeClient(200, body: '{"success":true}'))
           .register('fake'),
       RegistrationResult.failed,
     );

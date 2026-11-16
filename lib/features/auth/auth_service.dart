@@ -1,5 +1,9 @@
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../../core/network/api_client.dart';
+import '../../core/notifications/notification_binding.dart';
+import '../../core/notifications/notification_service.dart';
+
 import 'auth_strategy.dart';
 
 class AuthService {
@@ -70,7 +74,23 @@ class AuthService {
     return _auth.currentUser?.getIdToken(true) ?? Future.value(null);
   }
 
-  Future<void> signOut() {
-    return _auth.signOut();
+  Future<void> signOut() async {
+    final uid = _auth.currentUser?.uid;
+    final token = NotificationBinding.token;
+    final bindingId = NotificationBinding.id;
+    if (uid != null &&
+        NotificationBinding.uid == uid &&
+        token != null &&
+        bindingId != null) {
+      try {
+        await NotificationTokenApi(ApiClient(authService: this))
+            .unregister(token, bindingId);
+      } catch (_) {
+        // Offline logout still clears the local binding. A stale generic OS
+        // alert contains no account information and cannot refresh the app.
+      }
+    }
+    NotificationBinding.clear();
+    await _auth.signOut();
   }
 }

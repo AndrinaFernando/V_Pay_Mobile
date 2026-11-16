@@ -27,6 +27,41 @@ class FakeTopUpService implements TopUpService {
 }
 
 void main() {
+  for (final appBar in [false, true]) {
+    testWidgets('Top Up back returns to dashboard (${appBar ? 'AppBar' : 'Android'})',
+        (tester) async {
+      final service = FakeTopUpService();
+      await tester.pumpWidget(MaterialApp(home: Builder(builder: (context) =>
+          Scaffold(body: TextButton(
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                builder: (_) => TopUpScreen(service: service))),
+            child: const Text('Dashboard'),
+          )))));
+      await tester.tap(find.text('Dashboard'));
+      await tester.pumpAndSettle();
+      expect(find.text('Continue to Rupio'), findsOneWidget);
+      if (appBar) {
+        await tester.tap(find.byTooltip('Back'));
+      } else {
+        await tester.binding.handlePopRoute();
+      }
+      await tester.pumpAndSettle();
+      expect(find.text('Dashboard'), findsOneWidget);
+      expect(service.createCalls, 0);
+    });
+  }
+
+  testWidgets('history back returns to Top Up without ending checkout', (tester) async {
+    final service = FakeTopUpService();
+    await tester.pumpWidget(MaterialApp(home: TopUpScreen(service: service)));
+    await tester.tap(find.text('Top-up history'));
+    await tester.pumpAndSettle();
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('Continue to Rupio'), findsOneWidget);
+    expect(service.createCalls, 0);
+  });
+
   testWidgets('history opens on a separate screen and shows details', (
     tester,
   ) async {

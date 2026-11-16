@@ -47,7 +47,9 @@ class CustomerTransactionTile extends StatelessWidget {
               borderRadius: BorderRadius.circular(13),
             ),
             child: Icon(
-              Icons.storefront_outlined,
+              transaction.isTopUp
+                  ? Icons.add_circle_outline_rounded
+                  : Icons.storefront_outlined,
               color: statusColor,
               size: 22,
             ),
@@ -69,7 +71,9 @@ class CustomerTransactionTile extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  _formatDateTime(transaction.createdAt.toLocal()),
+                  transaction.createdAt == null
+                      ? 'Date unavailable'
+                      : _formatDateTime(transaction.createdAt!.toLocal()),
                   style: const TextStyle(color: _secondary, fontSize: 12),
                 ),
               ],
@@ -80,7 +84,7 @@ class CustomerTransactionTile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                formatLkrMinor(transaction.amountMinor),
+                '${transaction.isTopUp ? (transaction.status == CustomerPaymentStatus.success ? '+' : '') : '-'}${formatLkrMinor(transaction.amountMinor)}',
                 style: const TextStyle(
                   color: _ink,
                   fontSize: 14,
@@ -89,7 +93,7 @@ class CustomerTransactionTile extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                transaction.status.apiValue,
+                transaction.statusLabel ?? transaction.status.apiValue,
                 style: TextStyle(
                   color: statusColor,
                   fontSize: 11,

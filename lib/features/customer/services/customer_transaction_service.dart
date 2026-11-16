@@ -45,7 +45,7 @@ class ApiCustomerTransactionService implements CustomerTransactionService {
                 CustomerTransaction.fromJson(item as Map<String, dynamic>),
           )
           .toList(growable: false);
-      parsed.sort((left, right) => right.createdAt.compareTo(left.createdAt));
+      parsed.sort((left, right) => right.createdAt!.compareTo(left.createdAt!));
       return parsed;
     } on FormatException {
       throw const ApiException(200, 'Invalid transaction history response');

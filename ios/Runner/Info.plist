@@ -26,6 +26,8 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>VPay uses the camera to scan merchant payment QR codes.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Use Face ID to securely unlock VPay.</string>
 	<key>UIApplicationSceneManifest</key>

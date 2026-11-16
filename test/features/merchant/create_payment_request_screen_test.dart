@@ -38,12 +38,14 @@ class _FakePaymentIntentService implements PaymentIntentService {
     this.error,
     this.pending,
     this.statusResponses,
+    this.statusOutcomes,
   });
 
   final MerchantPaymentIntent? intent;
   final Object? error;
   final Completer<MerchantPaymentIntent>? pending;
   final List<MerchantPaymentIntent>? statusResponses;
+  final List<Object>? statusOutcomes;
   int calls = 0;
   int statusCalls = 0;
   int? requestedAmountMinor;
@@ -66,6 +68,13 @@ class _FakePaymentIntentService implements PaymentIntentService {
   Future<MerchantPaymentIntent> getPaymentIntent({
     required String paymentReference,
   }) async {
+    final outcomes = statusOutcomes;
+    if (outcomes != null && outcomes.isNotEmpty) {
+      final outcome = outcomes[statusCalls.clamp(0, outcomes.length - 1)];
+      statusCalls++;
+      if (outcome is MerchantPaymentIntent) return outcome;
+      throw outcome;
+    }
     if (error != null) throw error!;
     final responses = statusResponses;
     final response = responses == null || responses.isEmpty
@@ -425,6 +434,83 @@ void main() {
     expect(service.statusCalls, 1);
   });
 
+  testWidgets('PENDING to SUCCESS refreshes merchant data exactly once', (
+    tester,
+  ) async {
+    final pendingIntent = _intent();
+    final successIntent = _intent(
+      status: 'SUCCESS',
+      createdAt: pendingIntent.createdAt,
+      expiresAt: pendingIntent.expiresAt,
+    );
+    final service = _FakePaymentIntentService(statusOutcomes: [successIntent]);
+    var refreshCalls = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PaymentIntentQrScreen(
+          paymentIntent: pendingIntent,
+          paymentIntentService: service,
+          onConfirmedSuccess: () async {
+            refreshCalls++;
+          },
+          statusPollInterval: const Duration(seconds: 1),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Payment received'), findsOneWidget);
+    expect(refreshCalls, 1);
+    expect(service.statusCalls, 1);
+    await tester.pump(const Duration(seconds: 3));
+    expect(refreshCalls, 1);
+    expect(service.statusCalls, 1);
+  });
+
+  testWidgets('PROCESSING continues polling until SUCCESS', (tester) async {
+    final pendingIntent = _intent();
+    final processingIntent = _intent(
+      status: 'PROCESSING',
+      createdAt: pendingIntent.createdAt,
+      expiresAt: pendingIntent.expiresAt,
+    );
+    final successIntent = _intent(
+      status: 'SUCCESS',
+      createdAt: pendingIntent.createdAt,
+      expiresAt: pendingIntent.expiresAt,
+    );
+    final service = _FakePaymentIntentService(
+      statusOutcomes: [processingIntent, successIntent],
+    );
+    var refreshCalls = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PaymentIntentQrScreen(
+          paymentIntent: pendingIntent,
+          paymentIntentService: service,
+          onConfirmedSuccess: () async {
+            refreshCalls++;
+          },
+          statusPollInterval: const Duration(seconds: 1),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Payment processing'), findsOneWidget);
+    expect(service.statusCalls, 1);
+
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Payment received'), findsOneWidget);
+    expect(service.statusCalls, 2);
+    expect(refreshCalls, 1);
+  });
+
   testWidgets('renders each agreed payment status from the backend', (
     tester,
   ) async {
@@ -447,12 +533,16 @@ void main() {
         intent: serverIntent,
         statusResponses: [serverIntent],
       );
+      var refreshCalls = 0;
 
       await tester.pumpWidget(
         MaterialApp(
           home: PaymentIntentQrScreen(
             paymentIntent: pendingIntent,
             paymentIntentService: service,
+            onConfirmedSuccess: () async {
+              refreshCalls++;
+            },
             statusPollInterval: const Duration(hours: 1),
           ),
         ),
@@ -473,6 +563,19 @@ void main() {
         reason: 'Only active requests can be manually refreshed',
       );
       expect(service.statusCalls, 1, reason: entry.key);
+      expect(
+        refreshCalls,
+        entry.key == 'SUCCESS' ? 1 : 0,
+        reason: 'Only backend-confirmed success refreshes merchant data',
+      );
+      if (entry.key == 'FAILED' || entry.key == 'EXPIRED') {
+        expect(
+          find.text(
+            entry.key == 'FAILED' ? 'Payment failed' : 'Request expired',
+          ),
+          findsWidgets,
+        );
+      }
       await tester.pumpWidget(const SizedBox.shrink());
     }
   });
@@ -507,6 +610,49 @@ void main() {
     );
     expect(find.byKey(const Key('paymentStatusRefreshError')), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('network interruption remains uncertain and retry can confirm', (
+    tester,
+  ) async {
+    final pendingIntent = _intent();
+    final successIntent = _intent(
+      status: 'SUCCESS',
+      createdAt: pendingIntent.createdAt,
+      expiresAt: pendingIntent.expiresAt,
+    );
+    final service = _FakePaymentIntentService(
+      statusOutcomes: [StateError('offline'), successIntent],
+    );
+    var refreshCalls = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PaymentIntentQrScreen(
+          paymentIntent: pendingIntent,
+          paymentIntentService: service,
+          onConfirmedSuccess: () async {
+            refreshCalls++;
+          },
+          statusPollInterval: const Duration(hours: 1),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Awaiting customer payment'), findsOneWidget);
+    expect(find.text('Payment received'), findsNothing);
+    expect(refreshCalls, 0);
+
+    await tester.ensureVisible(
+      find.byKey(const Key('refreshPaymentStatusButton')),
+    );
+    await tester.tap(find.byKey(const Key('refreshPaymentStatusButton')));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Payment received'), findsOneWidget);
+    expect(refreshCalls, 1);
+    expect(service.statusCalls, 2);
   });
 
   testWidgets('keeps the QR scannable on a compact phone viewport', (
